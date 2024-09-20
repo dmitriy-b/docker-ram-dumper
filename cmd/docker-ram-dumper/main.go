@@ -38,7 +38,7 @@ func main() {
 	flag.Parse()
 
 	// Ensure dump directory exists
-	err := os.MkdirAll(dumpDirHost, 0755)
+	err := os.MkdirAll(dumpDirHost, 0o755)
 	if err != nil {
 		fmt.Println("Error creating dump directory:", err)
 		return
