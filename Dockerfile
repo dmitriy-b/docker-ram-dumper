@@ -1,7 +1,13 @@
+# Build stage
+FROM golang:1.17-alpine AS builder
+
+WORKDIR /app
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o docker-ram-dumper ./cmd/docker-ram-dumper
+
+# Final stage
 FROM alpine:latest
 
-ENV APP_NAME=docker-ram-dumper
-
 WORKDIR /root/
-COPY ./bin/${APP_NAME} ./${APP_NAME}
-ENTRYPOINT ./${APP_NAME}
+COPY --from=builder /app/docker-ram-dumper .
+ENTRYPOINT ["./docker-ram-dumper"]
