@@ -45,6 +45,7 @@ func main() {
 			},
 		},
 	}
+	defer client.CloseIdleConnections()
 
 	// Ensure dump directory exists
 	err := os.MkdirAll(dumpDirHost, 0o755)
