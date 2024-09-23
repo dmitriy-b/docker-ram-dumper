@@ -11,6 +11,7 @@ build-linux: generate ## Compile the binary for linux
 	@env GOOS=linux go build -o bin/$(APP_NAME) cmd/$(APP_NAME)/main.go
 
 build-docker: build-linux ## Build docker image
+	@rm ./dumps/*.dmp || true
 	@docker build -t $(APP_NAME) .
 
 install: build ## compile the binary and copy it to PATH
