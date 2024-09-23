@@ -2,7 +2,8 @@
 FROM golang:1.17-alpine AS builder
 
 WORKDIR /app
-COPY . .
+COPY . . 
+RUN rm -rf ./dumps
 RUN CGO_ENABLED=0 GOOS=linux go build -o docker-ram-dumper ./cmd/docker-ram-dumper
 
 # Final stage

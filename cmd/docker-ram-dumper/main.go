@@ -26,6 +26,7 @@ func main() {
 		checkInterval    time.Duration
 		monitor          bool
 		dumpsCount       int
+		cleanup          bool
 	)
 
 	flag.Float64Var(&threshold, "threshold", 90.0, "Memory usage threshold percentage")
@@ -36,6 +37,7 @@ func main() {
 	flag.DurationVar(&checkInterval, "interval", 30*time.Second, "Interval between memory checks")
 	flag.BoolVar(&monitor, "monitor", false, "Continuously monitor memory usage")
 	flag.IntVar(&dumpsCount, "dumps-count", 1, "Number of memory dumps to create before stopping")
+	flag.BoolVar(&cleanup, "cleanup", false, "Clean up dumps in container after a memory dump")
 
 	flag.Parse()
 
@@ -48,6 +50,10 @@ func main() {
 		},
 	}
 	defer client.CloseIdleConnections()
+
+	if cleanup {
+		defer cleanupDumps(client, containerName, dumpDirContainer)
+	}
 
 	// Ensure dump directory exists
 	err := os.MkdirAll(dumpDirHost, 0o755)
@@ -143,14 +149,19 @@ func main() {
 			fmt.Println("Dumping only once. Stopping.")
 			return
 		}
-		// Optional: Clean up
-		// err = execInContainer(client, containerName, "rm", "-rf", "/tmp/dumps")
-		// if err != nil {
-		//     fmt.Println("Error cleaning up dumps in container:", err)
-		// }
 
 		time.Sleep(checkInterval)
 	}
+}
+
+func cleanupDumps(client *http.Client, containerName, dumpDirContainer string) error {
+	_, err := execInContainer(client, containerName, "rm", "-rf", dumpDirContainer)
+	if err != nil {
+		return fmt.Errorf("error cleaning up dumps in container: %v", err)
+	} else {
+		fmt.Println("Successfully cleaned up dumps in container.")
+	}
+	return nil
 }
 
 func execInContainer(client *http.Client, containerName string, command ...string) (string, error) {
