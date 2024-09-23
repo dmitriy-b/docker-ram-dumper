@@ -25,6 +25,7 @@ func main() {
 		containerName    string
 		checkInterval    time.Duration
 		monitor          bool
+		dumpsCount       int
 	)
 
 	flag.Float64Var(&threshold, "threshold", 90.0, "Memory usage threshold percentage")
@@ -34,6 +35,7 @@ func main() {
 	flag.StringVar(&containerName, "container", "sedge-node", "Name of the container to monitor")
 	flag.DurationVar(&checkInterval, "interval", 30*time.Second, "Interval between memory checks")
 	flag.BoolVar(&monitor, "monitor", false, "Continuously monitor memory usage")
+	flag.IntVar(&dumpsCount, "dumps-count", 1, "Number of memory dumps to create before stopping")
 
 	flag.Parse()
 
@@ -53,6 +55,8 @@ func main() {
 		fmt.Println("Error creating dump directory:", err)
 		return
 	}
+
+	dumpCounter := 0
 
 	for {
 		// Get memory usage
@@ -128,16 +132,23 @@ func main() {
 				fmt.Printf("Dump file copied to host: %s\n", hostDumpFile)
 			}
 
-			// Optional: Clean up
-			// err = execInContainer(client, containerName, "rm", "-rf", "/tmp/dumps")
-			// if err != nil {
-			//     fmt.Println("Error cleaning up dumps in container:", err)
-			// }
+			dumpCounter++
+			if dumpCounter >= dumpsCount {
+				fmt.Printf("Reached the limit of %d dumps. Stopping.\n", dumpsCount)
+				return
+			}
 		}
 
 		if !monitor {
+			fmt.Println("Dumping only once. Stopping.")
 			return
 		}
+		// Optional: Clean up
+		// err = execInContainer(client, containerName, "rm", "-rf", "/tmp/dumps")
+		// if err != nil {
+		//     fmt.Println("Error cleaning up dumps in container:", err)
+		// }
+
 		time.Sleep(checkInterval)
 	}
 }
