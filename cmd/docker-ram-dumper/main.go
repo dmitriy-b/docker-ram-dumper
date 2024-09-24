@@ -27,6 +27,7 @@ func main() {
 		monitor          bool
 		dumpsCount       int
 		cleanup          bool
+		baseDockerURL    string
 	)
 
 	flag.Float64Var(&threshold, "threshold", 90.0, "Memory usage threshold percentage")
@@ -38,6 +39,7 @@ func main() {
 	flag.BoolVar(&monitor, "monitor", false, "Continuously monitor memory usage")
 	flag.IntVar(&dumpsCount, "dumps-count", 1, "Number of memory dumps to create before stopping")
 	flag.BoolVar(&cleanup, "cleanup", false, "Clean up dumps in container after a memory dump")
+	flag.StringVar(&baseDockerURL, "docker-url", "http://localhost", "Base URL for Docker API")
 
 	flag.Parse()
 
@@ -52,7 +54,7 @@ func main() {
 	defer client.CloseIdleConnections()
 
 	if cleanup {
-		defer cleanupDumps(client, containerName, dumpDirContainer)
+		defer cleanupDumps(client, containerName, dumpDirContainer, baseDockerURL)
 	}
 
 	// Ensure dump directory exists
@@ -66,7 +68,7 @@ func main() {
 
 	for {
 		// Get memory usage
-		memUsagePercent, totalMemory, err := getContainerMemoryUsage(client, containerName)
+		memUsagePercent, totalMemory, err := getContainerMemoryUsage(client, containerName, baseDockerURL)
 		totalMemoryThreshold := float64(totalMemory) * threshold / 100
 		fmt.Printf("Total memory threshold: %.0f%% (%.0f MB)\n", threshold, totalMemoryThreshold)
 		if err != nil {
@@ -85,10 +87,10 @@ func main() {
 
 			// Install dependencies inside the target container
 			// Check if procdump is already installed
-			_, err = execInContainer(client, containerName, "which", "procdump")
+			_, err = execInContainer(client, containerName, baseDockerURL, "which", "procdump")
 			if err != nil {
 				fmt.Println("Procdump not found. Installing...")
-				_, err = execInContainer(client, containerName, "sh", "-c", "apk add --no-cache procdump || apt-get update && apt-get install -y procdump")
+				_, err = execInContainer(client, containerName, baseDockerURL, "sh", "-c", "apk add --no-cache procdump || apt-get update && apt-get install -y procdump")
 				if err != nil {
 					fmt.Println("Error installing procdump:", err)
 					time.Sleep(checkInterval)
@@ -100,7 +102,7 @@ func main() {
 			}
 
 			// Get the PID of the processName process inside the target container
-			pid, err := getPIDInContainer(client, containerName, processName)
+			pid, err := getPIDInContainer(client, containerName, processName, baseDockerURL)
 			if err != nil {
 				fmt.Println("Error getting PID:", err)
 				time.Sleep(checkInterval)
@@ -110,7 +112,7 @@ func main() {
 			}
 
 			// Create a dump directory inside the container
-			_, err = execInContainer(client, containerName, "mkdir", "-p", "/tmp/dumps")
+			_, err = execInContainer(client, containerName, baseDockerURL, "mkdir", "-p", "/tmp/dumps")
 			if err != nil {
 				fmt.Println("Error creating dump directory in container:", err)
 				time.Sleep(checkInterval)
@@ -119,7 +121,7 @@ func main() {
 
 			// Run ProcDump inside the target container
 			dumpFile := fmt.Sprintf("%s/core_%d_%d.dmp", dumpDirContainer, pid, time.Now().Unix())
-			_, err = execInContainer(client, containerName, "procdump", "-d", "-n", "1", "-s", "1", "-M", fmt.Sprintf("%.0f", totalMemoryThreshold), "-p", fmt.Sprintf("%d", pid), "-o", dumpFile)
+			dumpOutput, err := execInContainer(client, containerName, baseDockerURL, "procdump", "-d", "-n", "1", "-s", "1", "-M", fmt.Sprintf("%.0f", totalMemoryThreshold), "-p", fmt.Sprintf("%d", pid), "-o", dumpFile)
 			if err != nil {
 				fmt.Println("Error creating dump:", err)
 				time.Sleep(checkInterval)
@@ -130,10 +132,11 @@ func main() {
 
 			// Copy the dump file from the target container to the host
 			hostDumpFile := filepath.Join(dumpDirHost, filepath.Base(dumpFile))
-			err = copyFromContainer(client, containerName, dumpFile+"_0."+strconv.Itoa(pid), hostDumpFile)
+			err = copyFromContainer(client, containerName, dumpFile+"_0."+strconv.Itoa(pid), hostDumpFile, baseDockerURL)
 			if err != nil {
 				fmt.Println("Error copying dump file from container:", err)
 				fmt.Printf("Executed command: docker exec %s procdump -d -n 1 -s 1 -M %.0f -p %d %s\n", containerName, totalMemoryThreshold, pid, dumpFile)
+				fmt.Printf("Command output: %s\n", dumpOutput)
 			} else {
 				fmt.Printf("Dump file copied to host: %s\n", hostDumpFile)
 			}
@@ -154,8 +157,8 @@ func main() {
 	}
 }
 
-func cleanupDumps(client *http.Client, containerName, dumpDirContainer string) error {
-	_, err := execInContainer(client, containerName, "rm", "-rf", dumpDirContainer)
+func cleanupDumps(client *http.Client, containerName, dumpDirContainer, baseDockerURL string) error {
+	_, err := execInContainer(client, containerName, baseDockerURL, "rm", "-rf", dumpDirContainer)
 	if err != nil {
 		return fmt.Errorf("error cleaning up dumps in container: %v", err)
 	} else {
@@ -164,7 +167,7 @@ func cleanupDumps(client *http.Client, containerName, dumpDirContainer string) e
 	return nil
 }
 
-func execInContainer(client *http.Client, containerName string, command ...string) (string, error) {
+func execInContainer(client *http.Client, containerName, baseDockerURL string, command ...string) (string, error) {
 	// Prepare the command execution request
 	execConfig := map[string]interface{}{
 		"AttachStdout": true,
@@ -177,7 +180,7 @@ func execInContainer(client *http.Client, containerName string, command ...strin
 	}
 
 	// Create exec instance
-	createURL := fmt.Sprintf("http://localhost/containers/%s/exec", containerName)
+	createURL := fmt.Sprintf("%s/containers/%s/exec", baseDockerURL, containerName)
 	resp, err := client.Post(createURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("failed to create exec instance: %v", err)
@@ -196,7 +199,7 @@ func execInContainer(client *http.Client, containerName string, command ...strin
 	}
 
 	// Start exec instance
-	startURL := fmt.Sprintf("http://localhost/exec/%s/start", execResponse.ID)
+	startURL := fmt.Sprintf("%s/exec/%s/start", baseDockerURL, execResponse.ID)
 	startConfig := map[string]interface{}{"Detach": false}
 	jsonData, _ = json.Marshal(startConfig)
 	resp, err = client.Post(startURL, "application/json", bytes.NewBuffer(jsonData))
@@ -218,20 +221,24 @@ func execInContainer(client *http.Client, containerName string, command ...strin
 	return output.String(), nil
 }
 
-func getPIDInContainer(client *http.Client, containerName, processName string) (int, error) {
-	command := []string{"sh", "-c", fmt.Sprintf("ps -ef | grep '%s' | grep -v grep | awk '{print $2}' | head -n1", processName)}
-	output, err := execInContainer(client, containerName, command...)
+func getPIDInContainer(client *http.Client, containerName, processName, baseDockerURL string) (int, error) {
+	command := []string{"sh", "-c", fmt.Sprintf("ps -ef | grep '%s' | grep -v grep | head -n1", processName)}
+	output, err := execInContainer(client, containerName, baseDockerURL, command...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute command in container: %v", err)
 	}
 
 	// Trim any whitespace and non-printable characters
-	pidStr := strings.TrimFunc(output, func(r rune) bool {
-		return !strconv.IsPrint(r)
-	})
-
+	fields := strings.Fields(output)
+	var pidStr string
+	for _, field := range fields {
+		if _, err := strconv.Atoi(field); err == nil {
+			pidStr = field
+			break
+		}
+	}
 	if pidStr == "" {
-		return 0, fmt.Errorf("no process found with name: %s", processName)
+		return 0, fmt.Errorf("no process found with name: %s. Output: %s", processName, output)
 	}
 
 	pid, err := strconv.Atoi(pidStr)
@@ -242,9 +249,9 @@ func getPIDInContainer(client *http.Client, containerName, processName string) (
 	return pid, nil
 }
 
-func copyFromContainer(client *http.Client, containerName, srcPath, dstPath string) error {
+func copyFromContainer(client *http.Client, containerName, srcPath, dstPath, baseDockerURL string) error {
 	// Docker API endpoint for copying files from a container
-	url := fmt.Sprintf("http://localhost/containers/%s/archive?path=%s", containerName, srcPath)
+	url := fmt.Sprintf("%s/containers/%s/archive?path=%s", baseDockerURL, containerName, srcPath)
 
 	// Send GET request to Docker API
 	resp, err := client.Get(url)
@@ -273,9 +280,9 @@ func copyFromContainer(client *http.Client, containerName, srcPath, dstPath stri
 	return nil
 }
 
-func getContainerMemoryUsage(client *http.Client, containerID string) (float64, uint64, error) {
+func getContainerMemoryUsage(client *http.Client, containerID, baseDockerURL string) (float64, uint64, error) {
 	// Docker API endpoint for container stats
-	url := fmt.Sprintf("http://localhost/containers/%s/stats?stream=false", containerID)
+	url := fmt.Sprintf("%s/containers/%s/stats?stream=false", baseDockerURL, containerID)
 
 	// Send the request
 	resp, err := client.Get(url)
