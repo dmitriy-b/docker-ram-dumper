@@ -53,6 +53,7 @@ Run the tool with the following command:
 - `-monitor`: Continuously monitor memory usage (default false)
 - `-dumps-count int`: Number of memory dumps to create before stopping (default 1)
 - `-cleanup`: Clean up dumps in container after copying memory dump to host (default false)
+- `-base-docker-url string`: Base Docker URL (default "http://localhost")
 
 ### Example
 

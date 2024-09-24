@@ -29,7 +29,6 @@ func TestGetContainerMemoryUsage(t *testing.T) {
 
 	// Test the function
 	memUsage, totalMemory, err := getContainerMemoryUsage(client, "test-container", dockerAPIEndpoint)
-
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -70,7 +69,6 @@ func TestGetPIDInContainer(t *testing.T) {
 
 	// Test the function
 	pid, err := getPIDInContainer(client, "test-container", "test-process", dockerAPIEndpoint)
-
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
