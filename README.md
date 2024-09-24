@@ -1,57 +1,97 @@
-# Go template from Nethermind Angkor team
+# Docker RAM Dumper
 
-This is a template for creating a new Go application made by the Nethermind Angkor team.
+Docker RAM Dumper is a Go-based tool designed to monitor memory usage of a specified Docker container and create memory dumps when usage exceeds a defined threshold.
 
-## Clone this template
+## Features
 
-To create a new repository from this template you can use the Github UI. See the
-[Github documentation](https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-from-a-template)
-for more information about creating a repository from a template.
+- Monitor memory usage of a specified Docker container
+- Create memory dumps when usage exceeds a threshold
+- Configurable process name, dump directories, and check intervals
+- Continuous monitoring option (the tool will create a dump every X seconds)
 
-## Initialization
+## Prerequisites
 
-After cloning this repository you need to set up the Go module of the project and
-the app name. To do that follow the steps below:
+- Go 1.20 or later
+- Docker installed and running
+- Access to Docker socket (/var/run/docker.sock)
+- [procdump](https://github.com/Sysinternals/ProcDump-for-Linux) installed in the container (if not, it will be installed by the tool)
+- ps, grep, awk installed in the container or passed from host (to get the pid of the process to dump)
 
-1.  Initialize Go module with the following command:
+## Installation
 
-    ```bash
-    go mod init [module-name]
-    ```
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/docker-ram-dumper.git
+   ```
 
-    The module-name could be for instance `github.com/NethermindEth/project-name`.
+2. Navigate to the project directory:
+   ```
+   cd docker-ram-dumper
+   ```
 
-2.  Run the `go mod tidy` command to download dependencies. Also you can use the
-    `make gomod_tidy` command.
+3. Build the project:
+   ```
+   go build -o docker-ram-dumper cmd/docker-ram-dumper/main.go
+   ```
 
-3. Rename the `cmd/app` directory to the name of your application.
+## Usage
 
-3.  Set the `APP_NAME` value in the [.env](.env) and in the [Dockerfile](Dockerfile) to the name
-    of your application. Make sure is the same name as the directory you renamed
-    in the previous step.
+Run the tool with the following command:
 
-4. Replace the `<repo>` value in the [CONTRIBUTING.md](CONTRIBUTING.md) file with url of your repository
-    to make the links work.
+```
+./docker-ram-dumper -container <container_name> -process <process_name> -threshold <memory_threshold> -interval <check_interval> -dumpdir-container <dump_directory_in_container> -dumpdir-host <dump_directory_on_host> -monitor
+```
 
-5. Replace the `<APP_NAME>` value in the [CONTRIBUTING.md](CONTRIBUTING.md) file with the name of your application.
+### Flags
 
-5. Check `CODEOWNERS` file, currently is an example file and should be updated. You can
-    find it in the `.github` directory. Also, see [this GitHub documentation](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)
-    about `CODEOWNERS` file.
+- `-threshold float`: Memory usage threshold percentage (default 90.0)
+- `-process string`: Name of the process to monitor (default "dotnet")
+- `-dumpdir-container string`: Directory to store memory dumps inside the container (default "/tmp/dumps")
+- `-dumpdir-host string`: Directory to store memory dumps on the host (default "/tmp/dumps")
+- `-container string`: Name of the container to monitor (default "sedge-node")
+- `-interval duration`: Interval between memory checks (default 30s)
+- `-monitor`: Continuously monitor memory usage (default false)
+- `-dumps-count int`: Number of memory dumps to create before stopping (default 1)
+- `-cleanup`: Clean up dumps in container after copying memory dump to host (default false)
 
-## Documentation
+### Example
 
-Inside the `docs` directory you can find a Docusaurus project with the initial structure
-for the documentation, read the [README.md](docs/README.md) file inside the directory for
-more information, also you can read the Docusaurus [documentation](https://docusaurus.io/docs).
+To monitor a container named "my-container" for a process named "myapp", with a memory threshold of 85%, checking every minute, and continuously monitoring:
 
-## Github Actions
+```
+./docker-ram-dumper -container my-container -process myapp -threshold 85 -interval 1m -monitor
+```
 
-This template has a set of Github Actions workflows that can be used to automate
-the CI/CD process of your application. The workflows are located in the [.github/workflows](.github/workflows)
-directory.
+## Running inside docker container
 
-## TODO
+To run the tool inside a docker container, you can use the following command:
 
-- Support [devcontainer](https://containers.dev/)
-- Template for debian package (for PPA)
+```
+docker build . -t docker-ram-dumper:latest
+docker run -v /var/run/docker.sock:/var/run/docker.sock -v $PWD/dumps:/tmp/dumps --net=host -it docker-ram-dumper:latest -threshold=<memory_threshold> -process=<process_name> -container=<container_name>
+```
+
+It is possible to pass procdump, ps, grep and awk from host to avoid installing them in the container:
+
+```
+docker run -v /var/run/docker.sock:/var/run/docker.sock -v $PWD/dumps:/tmp/dumps -v /usr/bin/procdump:/usr/bin/procdump -v /usr/bin/ps:/usr/bin/ps -v /usr/bin/grep:/usr/bin/grep -v /usr/bin/awk:/usr/bin/awk --net=host -it docker-ram-dumper:latest -threshold=<memory_threshold> -process=<process_name> -container=<container_name>
+```
+
+
+## How it works
+
+1. The tool connects to the Docker daemon and retrieves memory usage statistics for the specified container.
+2. If memory usage exceeds the threshold, it installs procdump in the container (if not already present).
+3. It then uses procdump to create a memory dump of the specified process.
+4. The dump file is copied from the container to the host machine.
+5. If continuous monitoring is enabled, the tool repeats this process at the specified interval.
+
+## Notes
+
+- Ensure that the user running the tool has permission to access the Docker socket.
+- The tool requires the ability to execute commands inside the target container and copy files from it.
+- Memory dumps can be large, so ensure sufficient disk space is available in both the container and on the host.
+
+## License
+
+[MIT License](LICENSE)
