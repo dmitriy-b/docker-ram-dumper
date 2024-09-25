@@ -15,5 +15,5 @@ RUN wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsof
 
 # Update package lists and install procdump
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends procdump && \
+    apt-get install -y --no-install-recommends procdump=1.2-2 && \
     rm -rf /var/lib/apt/lists/*
