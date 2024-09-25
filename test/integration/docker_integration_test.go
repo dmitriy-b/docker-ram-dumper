@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
@@ -123,7 +122,7 @@ func runStressCommand(containerID string) error {
 
 	// Updated command to use 90% of memory
 	cmd := []string{"stress-ng", "--vm", "1", "--vm-bytes", "50%", "--vm-hang", "0", "--timeout", "15s"}
-	execConfig := types.ExecConfig{
+	execConfig := container.ExecOptions{
 		Cmd:          cmd,
 		AttachStdout: true,
 		AttachStderr: true,
@@ -134,7 +133,7 @@ func runStressCommand(containerID string) error {
 		return fmt.Errorf("failed to create exec : %v", err)
 	}
 
-	resp, err := cli.ContainerExecAttach(ctx, execID.ID, types.ExecStartCheck{})
+	resp, err := cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to attach to exec: %v", err)
 	}
@@ -147,7 +146,7 @@ func runStressCommand(containerID string) error {
 	}
 	// t.Logf("stress-ng output: %s", output)
 
-	err = cli.ContainerExecStart(ctx, execID.ID, types.ExecStartCheck{})
+	err = cli.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to start exec: %v", err)
 	}
