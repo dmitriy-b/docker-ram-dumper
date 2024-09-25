@@ -11,7 +11,7 @@ jobs:
     name: Code format 
     strategy:
       matrix:
-        go: ["1.21"]
+        go: ["1.22"]
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
 
@@ -51,7 +51,7 @@ jobs:
     needs: code-format
     strategy:
       matrix:
-        go: ["1.21"]
+        go: ["1.22"]
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
 
@@ -94,7 +94,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        go: ["1.21"]
+        go: ["1.22"]
         os: [ubuntu-latest]
         codecov: [false]
     runs-on: ${{ matrix.os }}
