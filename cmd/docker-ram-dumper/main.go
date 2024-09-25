@@ -222,7 +222,7 @@ func execInContainer(client *http.Client, containerName, baseDockerURL string, c
 }
 
 func getPIDInContainer(client *http.Client, containerName, processName, baseDockerURL string) (int, error) {
-	command := []string{"sh", "-c", fmt.Sprintf("ps -ef | grep '%s' | grep -v grep | head -n1", processName)}
+	command := []string{"sh", "-c", fmt.Sprintf("ps -ef | grep '%s' | grep -v grep | tail -n1", processName)}
 	output, err := execInContainer(client, containerName, baseDockerURL, command...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute command in container: %v", err)
