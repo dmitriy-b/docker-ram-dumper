@@ -111,6 +111,12 @@ jobs:
       - name: Install deps
         run: make install-deps
 
+      - name: Build docker image with app
+        run: make build-docker
+
+      - name: Build docker image for testing
+        run: make build-docker-test
+
       - name: Run tests
         if: matrix.codecov == false 
         run: make test
