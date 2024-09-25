@@ -5,6 +5,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         stress-ng \
         wget \
+        gdb \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
@@ -17,3 +18,6 @@ RUN wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsof
 RUN apt-get update && \
     apt-get install -y --no-install-recommends procdump=1.2-2 && \
     rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /tmp/dumps
+RUN chmod 777 /tmp/dumps

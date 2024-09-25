@@ -52,6 +52,8 @@ func TestMemoryDumper(t *testing.T) {
 	outputCh := make(chan []byte, 1)
 	go func() {
 		cmd := exec.Command("docker", "run",
+			"--cap-add=SYS_PTRACE",
+			"--user=root",
 			"-v", "/var/run/docker.sock:/var/run/docker.sock",
 			"-v", "/tmp/test-dumps:/tmp/dumps",
 			"--net=host",
