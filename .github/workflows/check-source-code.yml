@@ -111,6 +111,14 @@ jobs:
       - name: Install deps
         run: make install-deps
 
+      - name: Fixing permissions on /tmp/test-dumps
+        run: |
+          mkdir -p /tmp/test-dumps
+          sudo chmod 777 /tmp/test-dumps
+      
+      - name: Fixing ptrace scope
+        run: echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
+
       - name: Build docker image with app
         run: make build-docker
 

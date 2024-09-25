@@ -53,6 +53,7 @@ func TestMemoryDumper(t *testing.T) {
 	go func() {
 		cmd := exec.Command("docker", "run",
 			"--cap-add=SYS_PTRACE",
+			"--security-opt", "seccomp=unconfined",
 			"--user=root",
 			"-v", "/var/run/docker.sock:/var/run/docker.sock",
 			"-v", "/tmp/test-dumps:/tmp/dumps",
