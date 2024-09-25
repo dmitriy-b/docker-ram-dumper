@@ -15,7 +15,7 @@ build-docker: build-linux ## Build docker image
 	@docker build -t $(APP_NAME) .
 
 build-docker-test: build-linux ## Build docker image
-	@ocker build . -f test/integration/Dockerfile -t ram-dumper-test-image:latest
+	@docker build . -f test/integration/Dockerfile -t ram-dumper-test-image:latest
 
 install: build ## compile the binary and copy it to PATH
 	@cp build/* /usr/local/bin
