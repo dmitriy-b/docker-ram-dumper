@@ -2,7 +2,6 @@ module github.com/NethermindEth/docker-ram-dumper
 
 go 1.21
 
-
 require github.com/docker/docker v20.10.24+incompatible
 
 require (
