@@ -114,7 +114,7 @@ func TestMemoryDumperNegativeScenario(t *testing.T) {
 	}
 
 	// Check if the dump file was created
-	checkDumpFiles(t, 1)
+	checkDumpFiles(t, 0)
 }
 
 func checkDumpFiles(t *testing.T, filesCount int) {

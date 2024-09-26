@@ -33,6 +33,7 @@ staticcheck: ## Run staticcheck against code
 	@staticcheck ./...
 
 test: generate ## Run tests
+	@go clean -testcache 
 	@go test ./...
 
 codecov-test: generate ## Run tests with coverage
