@@ -71,14 +71,59 @@ func TestMemoryDumper(t *testing.T) {
 	}
 
 	// Check if the dump file was created
+	checkDumpFiles(t, 1)
+}
+
+func TestMemoryDumperNegativeScenario(t *testing.T) {
+	// Start the test container
+	containerID := helpers.StartTestContainer(t)
+	defer helpers.StopAndRemoveContainer(t, containerID)
+	// Clean up the test dumps
+	defer os.RemoveAll(testDumpsDir)
+
+	// Run the memory stress command in the background
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- helpers.RunStressCommand(containerID, "50%", "15s")
+	}()
+	time.Sleep(5 * time.Second)
+
+	// Run your main program inside a Docker container in parallel
+	outputCh := make(chan []byte, 1)
+	go func() {
+		output, err := helpers.RunDockerRamDumper(map[string]string{
+			"threshold": "60",
+			"process":   "stress-ng-vm",
+			"container": helpers.TestContainerName,
+		})
+		if err != nil {
+			errCh <- fmt.Errorf("Failed to run main program: %v\nOutput: %s", err, output)
+			return
+		}
+		outputCh <- output
+	}()
+
+	// Check for errors from the goroutines
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("runStressCommand or main program failed: %v", err)
+		}
+	case output := <-outputCh:
+		t.Logf("docker-ram-dumper output: %s", output)
+	}
+
+	// Check if the dump file was created
+	checkDumpFiles(t, 1)
+}
+
+func checkDumpFiles(t *testing.T, filesCount int) {
 	dumpFiles, err := os.ReadDir(testDumpsDir)
 	if err != nil {
 		t.Fatalf("Failed to read dump directory: %v", err)
 	}
 
-	if len(dumpFiles) == 0 {
-		t.Errorf("No dump files were created")
-	} else {
-		t.Logf("Dump file created: %s", dumpFiles[0].Name())
+	if len(dumpFiles) != filesCount {
+		t.Errorf("Expected %d dump files, but found %d", filesCount, len(dumpFiles))
 	}
 }
