@@ -78,6 +78,25 @@ It is possible to pass procdump, ps, grep and awk from host to avoid installing 
 docker run -v /var/run/docker.sock:/var/run/docker.sock -v $PWD/dumps:/tmp/dumps -v /usr/bin/procdump:/usr/bin/procdump -v /usr/bin/ps:/usr/bin/ps -v /usr/bin/grep:/usr/bin/grep -v /usr/bin/awk:/usr/bin/awk --net=host -it docker-ram-dumper:latest -threshold=<memory_threshold> -process=<process_name> -container=<container_name>
 ```
 
+### Download docker image from github container registry
+
+1. Create a [personal access token ](https://github.com/settings/tokens)(PAT) on github with repo access
+2. Set the PAT as an environment variable
+
+```
+export CR_PAT=<your_pat>
+```
+3. Login to github container registry
+
+```
+echo $CR_PAT | docker login ghcr.io -u USERNAME --password-stdin
+```
+
+4. Download the image
+
+```
+docker pull ghcr.io/dmitriy-b/docker-ram-dumper:main
+```
 
 ## How it works
 
