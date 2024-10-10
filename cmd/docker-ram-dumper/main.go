@@ -107,7 +107,6 @@ func main() {
 		default:
 			// Get memory usage
 			memUsagePercent, _, err := helpers.GetContainerMemoryUsage(client, containerName, baseDockerURL, false)
-
 			if err != nil {
 				fmt.Println("Error getting memory usage:", err)
 				if !monitor {
