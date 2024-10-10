@@ -24,6 +24,7 @@ func StartTestContainer(t *testing.T) string {
 		t.Fatalf("Failed to create Docker client: %v", err)
 	}
 
+	fmt.Println("Creating container:", TestContainerName)
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: TestImageName,
 		Cmd:   []string{"sleep", "infinity"},
@@ -103,6 +104,7 @@ func StopAndRemoveContainer(t *testing.T, containerID string) {
 }
 
 func RemoveTestContainer() {
+	fmt.Println("Removing test container:", TestContainerName)
 	exec.Command("docker", "rm", "-f", TestContainerName).Run()
 }
 

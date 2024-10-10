@@ -4,6 +4,7 @@ generate:
 	@go generate ./...
 
 build: generate ## Compile the binary
+	@rm -rf bin/*
 	@mkdir -p bin
 	@go build -o bin/$(APP_NAME) cmd/$(APP_NAME)/main.go
 
@@ -14,7 +15,7 @@ build-docker: build-linux ## Build docker image
 	@rm ./dumps/*.dmp || true
 	@docker build -t $(APP_NAME) .
 
-build-docker-test: build-linux ## Build docker image
+build-docker-test: build-docker ## Build docker image
 	@docker build . -f test/integration/Dockerfile -t ram-dumper-test-image:latest
 
 install: build ## compile the binary and copy it to PATH

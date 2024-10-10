@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ func main() {
 		dumpsCount       int
 		cleanup          bool
 		baseDockerURL    string
+		dumpTool         string
 	)
 
 	flag.Float64Var(&threshold, "threshold", 90.0, "Memory usage threshold percentage")
@@ -40,6 +42,7 @@ func main() {
 	flag.IntVar(&dumpsCount, "dumps-count", 1, "Number of memory dumps to create before stopping")
 	flag.BoolVar(&cleanup, "cleanup", false, "Clean up dumps in container after a memory dump")
 	flag.StringVar(&baseDockerURL, "docker-url", "http://localhost", "Base URL for Docker API")
+	flag.StringVar(&dumpTool, "dump-tool", "procdump", "Tool to use for memory dump (procdump or dotnet-dump)")
 
 	flag.Parse()
 
@@ -86,19 +89,11 @@ func main() {
 			fmt.Println("Memory usage threshold exceeded. Initiating memory dump...")
 
 			// Install dependencies inside the target container
-			// Check if procdump is already installed
-			_, err = execInContainer(client, containerName, baseDockerURL, "which", "procdump")
+			err := installDumpTool(client, containerName, dumpTool, baseDockerURL)
 			if err != nil {
-				fmt.Println("Procdump not found. Installing...")
-				_, err = execInContainer(client, containerName, baseDockerURL, "sh", "-c", "apk add --no-cache procdump || apt-get update && apt-get install -y procdump")
-				if err != nil {
-					fmt.Println("Error installing procdump:", err)
-					time.Sleep(checkInterval)
-					continue
-				}
-				fmt.Println("Procdump installed successfully.")
-			} else {
-				fmt.Println("Procdump is already installed.")
+				fmt.Println("Error installing dump tool:", err)
+				time.Sleep(checkInterval)
+				continue
 			}
 
 			// Get the PID of the processName process inside the target container
@@ -116,14 +111,16 @@ func main() {
 			if err != nil {
 				fmt.Println("Error creating dump directory in container:", err)
 				time.Sleep(checkInterval)
+				// continue
 				return
 			}
 
-			// Run ProcDump inside the target container
+			// Run the selected dump tool inside the target container
 			dumpFile := fmt.Sprintf("%s/core_%d_%d.dmp", dumpDirContainer, pid, time.Now().Unix())
-			dumpOutput, err := execInContainer(client, containerName, baseDockerURL, "procdump", "-d", "-n", "1", "-s", "1", "-M", fmt.Sprintf("%.0f", totalMemoryThreshold), "-p", fmt.Sprintf("%d", pid), "-o", dumpFile)
+			dumpOutput, err := createMemoryDump(client, containerName, dumpTool, pid, dumpFile, totalMemoryThreshold, baseDockerURL)
 			if err != nil {
 				fmt.Println("Error creating dump:", err)
+				fmt.Printf("Command output: %s\n", dumpOutput)
 				time.Sleep(checkInterval)
 				continue
 			}
@@ -134,8 +131,7 @@ func main() {
 			hostDumpFile := filepath.Join(dumpDirHost, filepath.Base(dumpFile))
 			err = copyFromContainer(client, containerName, dumpFile+"_0."+strconv.Itoa(pid), hostDumpFile, baseDockerURL)
 			if err != nil {
-				fmt.Println("Error copying dump file from container:", err)
-				fmt.Printf("Executed command: docker exec %s procdump -d -n 1 -s 1 -M %.0f -p %d %s\n", containerName, totalMemoryThreshold, pid, dumpFile)
+				fmt.Println("Error copying dump file ("+dumpFile+"_0."+strconv.Itoa(pid)+") to host:", err)
 				fmt.Printf("Command output: %s\n", dumpOutput)
 			} else {
 				fmt.Printf("Dump file copied to host: %s\n", hostDumpFile)
@@ -261,7 +257,7 @@ func copyFromContainer(client *http.Client, containerName, srcPath, dstPath, bas
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to copy file from container: HTTP status %d", resp.StatusCode)
+		return fmt.Errorf("failed to copy file from container: %s. (HTTP status %d)", srcPath, resp.StatusCode)
 	}
 
 	// Create the destination file
@@ -317,4 +313,74 @@ type DockerStats struct {
 		Usage uint64 `json:"usage"`
 		Limit uint64 `json:"limit"`
 	} `json:"memory_stats"`
+}
+
+func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL string) error {
+	switch dumpTool {
+	case "procdump":
+		// Check if procdump is already installed
+		_, err := execInContainer(client, containerName, baseDockerURL, "which", "procdump")
+		if err != nil {
+			fmt.Println("Procdump not found. Installing...")
+			_, err = execInContainer(client, containerName, baseDockerURL, "sh", "-c", "apk add --no-cache procdump || apt-get update && apt-get install -y procdump")
+			if err != nil {
+				return fmt.Errorf("error installing procdump: %v", err)
+			}
+			fmt.Println("Procdump installed successfully.")
+		} else {
+			fmt.Println("Procdump is already installed.")
+		}
+	case "dotnet-dump":
+		// Check if dotnet-dump is already installed
+		_, err := execInContainer(client, containerName, baseDockerURL, "which", "dotnet-dump")
+		if err != nil {
+			fmt.Println("dotnet-dump not found. Installing...")
+			_, err = execInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y curl && curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 7.0 --install-dir /root/.dotnet && dotnet tool install --global dotnet-dump")
+			if err != nil {
+				return fmt.Errorf("error installing dotnet-dump: %v", err)
+			}
+			fmt.Println("dotnet-dump installed successfully.")
+		} else {
+			fmt.Println("dotnet-dump is already installed.")
+		}
+	default:
+		return fmt.Errorf("unsupported dump tool: %s", dumpTool)
+	}
+	return nil
+}
+
+func createMemoryDump(client *http.Client, containerName, dumpTool string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string) (string, error) {
+	var cmd []string
+	switch dumpTool {
+	case "procdump":
+		cmd = []string{"procdump", "-d", "-n", "1", "-s", "1", "-M", fmt.Sprintf("%.0f", totalMemoryThreshold), "-p", fmt.Sprintf("%d", pid), "-o", dumpFile}
+		return execInContainer(client, containerName, baseDockerURL, cmd...)
+	case "dotnet-dump":
+		// Create a wrapper function to check memory usage before running dotnet-dump
+		return createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, baseDockerURL)
+	default:
+		return "", errors.New("unsupported dump tool")
+	}
+}
+
+func createDotnetDump(client *http.Client, containerName string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string) (string, error) {
+	for {
+		memUsagePercent, memoryUsageMB, err := getContainerMemoryUsage(client, containerName, baseDockerURL)
+		if err != nil {
+			return "", fmt.Errorf("failed to get memory usage: %v", err)
+		}
+
+		if float64(memoryUsageMB) >= totalMemoryThreshold {
+			cmd := []string{"/root/.dotnet/tools/dotnet-dump", "collect", "-p", fmt.Sprintf("%d", pid), "-o", dumpFile}
+			return execInContainer(client, containerName, baseDockerURL, cmd...)
+		} else {
+			fmt.Printf("Memory usage is %.2f%% (%.0f MB). Waiting for memory usage to exceed %.0f%% (%.0f MB)...\n",
+				memUsagePercent,
+				float64(memoryUsageMB),
+				totalMemoryThreshold,
+				totalMemoryThreshold)
+		}
+
+		time.Sleep(1 * time.Second)
+	}
 }
