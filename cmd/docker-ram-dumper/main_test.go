@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	helpers "github.com/NethermindEth/docker-ram-dumper/internal/_helpers"
 )
 
 func TestGetContainerMemoryUsage(t *testing.T) {
@@ -28,7 +30,7 @@ func TestGetContainerMemoryUsage(t *testing.T) {
 	dockerAPIEndpoint := server.URL
 
 	// Test the function
-	memUsage, totalMemory, err := getContainerMemoryUsage(client, "test-container", dockerAPIEndpoint, true)
+	memUsage, totalMemory, err := helpers.GetContainerMemoryUsage(client, "test-container", dockerAPIEndpoint, true)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -68,7 +70,7 @@ func TestGetPIDInContainer(t *testing.T) {
 	dockerAPIEndpoint := server.URL
 
 	// Test the function
-	pid, err := getPIDInContainer(client, "test-container", "test-process", dockerAPIEndpoint)
+	pid, err := helpers.GetPIDInContainer(client, "test-container", "test-process", dockerAPIEndpoint)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -131,7 +133,7 @@ func TestExecInContainer(t *testing.T) {
 	containerName := "test-container"
 	baseDockerURL := server.URL
 
-	output, err := execInContainer(client, containerName, baseDockerURL, "test", "command")
+	output, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "test", "command")
 	if err != nil {
 		t.Errorf("execInContainer failed: %v", err)
 	}

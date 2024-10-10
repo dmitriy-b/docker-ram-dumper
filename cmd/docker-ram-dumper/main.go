@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	helpers "github.com/NethermindEth/docker-ram-dumper/internal/_helpers"
 )
 
 func main() {
@@ -75,7 +74,7 @@ func main() {
 	}
 
 	dumpCounter := 0
-	_, totalMemory, _ := getContainerMemoryUsage(client, containerName, baseDockerURL, true)
+	_, totalMemory, _ := helpers.GetContainerMemoryUsage(client, containerName, baseDockerURL, true)
 	var totalMemoryThreshold float64
 	if isPercentage {
 		totalMemoryThreshold = float64(totalMemory) * thresholdValue / 100
@@ -87,7 +86,7 @@ func main() {
 
 	for {
 		// Get memory usage
-		memUsagePercent, _, err := getContainerMemoryUsage(client, containerName, baseDockerURL, false)
+		memUsagePercent, _, err := helpers.GetContainerMemoryUsage(client, containerName, baseDockerURL, false)
 
 		if err != nil {
 			fmt.Println("Error getting memory usage:", err)
@@ -112,7 +111,7 @@ func main() {
 			}
 
 			// Get the PID of the processName process inside the target container
-			pid, err := getPIDInContainer(client, containerName, processName, baseDockerURL)
+			pid, err := helpers.GetPIDInContainer(client, containerName, processName, baseDockerURL)
 			if err != nil {
 				fmt.Println("Error getting PID:", err)
 				time.Sleep(checkInterval)
@@ -122,7 +121,7 @@ func main() {
 			}
 
 			// Create a dump directory inside the container
-			_, err = execInContainer(client, containerName, baseDockerURL, "mkdir", "-p", "/tmp/dumps")
+			_, err = helpers.ExecInContainer(client, containerName, baseDockerURL, "mkdir", "-p", "/tmp/dumps")
 			if err != nil {
 				fmt.Println("Error creating dump directory in container:", err)
 				time.Sleep(checkInterval)
@@ -147,7 +146,7 @@ func main() {
 			if dumpTool == "procdump" {
 				dumpFile = dumpFile + "_0." + strconv.Itoa(pid)
 			}
-			err = copyFromContainer(client, containerName, dumpFile, hostDumpFile, baseDockerURL)
+			err = helpers.CopyFromContainer(client, containerName, dumpFile, hostDumpFile, baseDockerURL)
 			if err != nil {
 				fmt.Println("Error copying dump file (dumpFile) to host:", err)
 				fmt.Printf("Command output: %s\n", dumpOutput)
@@ -174,7 +173,7 @@ func main() {
 }
 
 func cleanupDumps(client *http.Client, containerName, dumpDirContainer, baseDockerURL string) error {
-	_, err := execInContainer(client, containerName, baseDockerURL, "rm", "-rf", dumpDirContainer)
+	_, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "rm", "-rf", dumpDirContainer)
 	if err != nil {
 		return fmt.Errorf("error cleaning up dumps in container: %v", err)
 	} else {
@@ -183,168 +182,14 @@ func cleanupDumps(client *http.Client, containerName, dumpDirContainer, baseDock
 	return nil
 }
 
-func execInContainer(client *http.Client, containerName, baseDockerURL string, command ...string) (string, error) {
-	// Prepare the command execution request
-	execConfig := map[string]interface{}{
-		"AttachStdout": true,
-		"AttachStderr": true,
-		"Cmd":          command,
-	}
-	jsonData, err := json.Marshal(execConfig)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal exec config: %v", err)
-	}
-
-	// Create exec instance
-	createURL := fmt.Sprintf("%s/containers/%s/exec", baseDockerURL, containerName)
-	resp, err := client.Post(createURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", fmt.Errorf("failed to create exec instance: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("failed to create exec instance: HTTP status %d", resp.StatusCode)
-	}
-
-	var execResponse struct {
-		ID string `json:"Id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&execResponse); err != nil {
-		return "", fmt.Errorf("failed to decode exec response: %v", err)
-	}
-
-	// Start exec instance
-	startURL := fmt.Sprintf("%s/exec/%s/start", baseDockerURL, execResponse.ID)
-	startConfig := map[string]interface{}{"Detach": false}
-	jsonData, _ = json.Marshal(startConfig)
-	resp, err = client.Post(startURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", fmt.Errorf("failed to start exec instance: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to start exec instance: HTTP status %d", resp.StatusCode)
-	}
-
-	var output bytes.Buffer
-	_, err = io.Copy(&output, resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read exec output: %v", err)
-	}
-
-	return output.String(), nil
-}
-
-func getPIDInContainer(client *http.Client, containerName, processName, baseDockerURL string) (int, error) {
-	command := []string{"sh", "-c", fmt.Sprintf("ps -ef | grep '%s' | grep -v grep | tail -n1", processName)}
-	output, err := execInContainer(client, containerName, baseDockerURL, command...)
-	if err != nil {
-		return 0, fmt.Errorf("failed to execute command in container: %v", err)
-	}
-
-	// Trim any whitespace and non-printable characters
-	fields := strings.Fields(output)
-	var pidStr string
-	for _, field := range fields {
-		if _, err := strconv.Atoi(field); err == nil {
-			pidStr = field
-			break
-		}
-	}
-	if pidStr == "" {
-		return 0, fmt.Errorf("no process found with name: %s. Output: %s", processName, output)
-	}
-
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse PID (%q): %v", pidStr, err)
-	}
-
-	return pid, nil
-}
-
-func copyFromContainer(client *http.Client, containerName, srcPath, dstPath, baseDockerURL string) error {
-	// Docker API endpoint for copying files from a container
-	url := fmt.Sprintf("%s/containers/%s/archive?path=%s", baseDockerURL, containerName, srcPath)
-
-	// Send GET request to Docker API
-	resp, err := client.Get(url)
-	if err != nil {
-		return fmt.Errorf("failed to send request to Docker API: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to copy file from container: %s. (HTTP status %d)", srcPath, resp.StatusCode)
-	}
-
-	// Create the destination file
-	dstFile, err := os.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("failed to create destination file: %v", err)
-	}
-	defer dstFile.Close()
-
-	// Copy the content from the response body to the destination file
-	_, err = io.Copy(dstFile, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to copy file content: %v", err)
-	}
-
-	return nil
-}
-
-func getContainerMemoryUsage(client *http.Client, containerID, baseDockerURL string, printStats bool) (float64, uint64, error) {
-	// Docker API endpoint for container stats
-	url := fmt.Sprintf("%s/containers/%s/stats?stream=false", baseDockerURL, containerID)
-
-	// Send the request
-	resp, err := client.Get(url)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer resp.Body.Close()
-
-	// Read the response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// Parse the JSON response
-	var stats DockerStats
-	err = json.Unmarshal(body, &stats)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// Calculate memory usage percentage
-	memUsage := float64(stats.MemoryStats.Usage) / float64(stats.MemoryStats.Limit) * 100
-	if printStats {
-		fmt.Printf("Docker RAM limit: %d MB\n", stats.MemoryStats.Limit/1024/1024)
-	}
-	fmt.Printf("Container memory usage: %d MB\n", stats.MemoryStats.Usage/1024/1024)
-	return memUsage, stats.MemoryStats.Limit / 1024 / 1024, nil
-}
-
-// Define structs to parse Docker stats JSON response
-type DockerStats struct {
-	MemoryStats struct {
-		Usage uint64 `json:"usage"`
-		Limit uint64 `json:"limit"`
-	} `json:"memory_stats"`
-}
-
 func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL string) error {
 	switch dumpTool {
 	case "procdump":
 		// Check if procdump is already installed
-		_, err := execInContainer(client, containerName, baseDockerURL, "which", "procdump")
+		_, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "which", "procdump")
 		if err != nil {
 			fmt.Println("Procdump not found. Installing...")
-			_, err = execInContainer(client, containerName, baseDockerURL, "sh", "-c", "apk add --no-cache procdump || apt-get update && apt-get install -y procdump")
+			_, err = helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apk add --no-cache procdump || apt-get update && apt-get install -y procdump")
 			if err != nil {
 				return fmt.Errorf("error installing procdump: %v", err)
 			}
@@ -354,10 +199,10 @@ func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL
 		}
 	case "dotnet-dump":
 		// Check if dotnet-dump is already installed
-		_, err := execInContainer(client, containerName, baseDockerURL, "which", "dotnet-dump")
+		_, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "which", "dotnet-dump")
 		if err != nil {
 			fmt.Println("dotnet-dump not found. Installing...")
-			_, err = execInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y curl && curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 7.0 --install-dir /root/.dotnet && dotnet tool install --global dotnet-dump")
+			_, err = helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y curl && curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 7.0 --install-dir /root/.dotnet && dotnet tool install --global dotnet-dump")
 			if err != nil {
 				return fmt.Errorf("error installing dotnet-dump: %v", err)
 			}
@@ -376,7 +221,7 @@ func createMemoryDump(client *http.Client, containerName, dumpTool string, pid i
 	switch dumpTool {
 	case "procdump":
 		cmd = []string{"procdump", "-d", "-n", "1", "-s", "1", "-M", fmt.Sprintf("%.0f", totalMemoryThreshold), "-p", fmt.Sprintf("%d", pid), "-o", dumpFile}
-		return execInContainer(client, containerName, baseDockerURL, cmd...)
+		return helpers.ExecInContainer(client, containerName, baseDockerURL, cmd...)
 	case "dotnet-dump":
 		// Create a wrapper function to check memory usage before running dotnet-dump
 		return createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, baseDockerURL, checkInterval)
@@ -387,14 +232,14 @@ func createMemoryDump(client *http.Client, containerName, dumpTool string, pid i
 
 func createDotnetDump(client *http.Client, containerName string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string, checkInterval time.Duration) (string, error) {
 	for {
-		memUsagePercent, memoryUsageMB, err := getContainerMemoryUsage(client, containerName, baseDockerURL, false)
+		memUsagePercent, memoryUsageMB, err := helpers.GetContainerMemoryUsage(client, containerName, baseDockerURL, false)
 		if err != nil {
 			return "", fmt.Errorf("failed to get memory usage: %v", err)
 		}
 
 		if float64(memoryUsageMB) >= totalMemoryThreshold {
 			cmd := []string{"/root/.dotnet/tools/dotnet-dump", "collect", "-p", fmt.Sprintf("%d", pid), "-o", dumpFile}
-			return execInContainer(client, containerName, baseDockerURL, cmd...)
+			return helpers.ExecInContainer(client, containerName, baseDockerURL, cmd...)
 		} else {
 			fmt.Printf("Memory usage is %.2f%% (%.0f MB). Waiting for memory usage to exceed %.0f%% (%.0f MB)...\n",
 				memUsagePercent,

@@ -16,6 +16,8 @@ Docker RAM Dumper is a Go-based tool designed to monitor memory usage of a speci
 - Access to Docker socket (/var/run/docker.sock)
 - [procdump](https://github.com/Sysinternals/ProcDump-for-Linux) installed in the container (if not, it will be installed by the tool)
 - ps, grep, awk installed in the container or passed from host (to get the pid of the process to dump)
+- .NET Core SDK installed in the container (if using [dotnet-dump](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-dump))
+
 
 ## Installation
 
@@ -54,6 +56,7 @@ Run the tool with the following command:
 - `-dumps-count int`: Number of memory dumps to create before stopping (default 1)
 - `-cleanup`: Clean up dumps in container after copying memory dump to host (default false)
 - `-base-docker-url string`: Base Docker URL (default "http://localhost")
+- `-dump-tool string`: Tool to use for memory dump, `procdump` or `dotnet-dump` (default "procdump")
 
 ### Example
 
