@@ -28,7 +28,7 @@ func TestGetContainerMemoryUsage(t *testing.T) {
 	dockerAPIEndpoint := server.URL
 
 	// Test the function
-	memUsage, totalMemory, err := getContainerMemoryUsage(client, "test-container", dockerAPIEndpoint)
+	memUsage, totalMemory, err := getContainerMemoryUsage(client, "test-container", dockerAPIEndpoint, true)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}

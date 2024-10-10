@@ -19,7 +19,9 @@ import (
 
 func main() {
 	var (
-		threshold        float64
+		threshold        string
+		thresholdValue   float64
+		isPercentage     bool
 		processName      string
 		dumpDirContainer string
 		dumpDirHost      string
@@ -32,7 +34,7 @@ func main() {
 		dumpTool         string
 	)
 
-	flag.Float64Var(&threshold, "threshold", 90.0, "Memory usage threshold percentage")
+	flag.StringVar(&threshold, "threshold", "90%", "Memory usage threshold (e.g., '90%' or '1000MB')")
 	flag.StringVar(&processName, "process", "dotnet", "Name of the process to monitor")
 	flag.StringVar(&dumpDirContainer, "dumpdir-container", "/tmp/dumps", "Directory to store memory dumps inside the container")
 	flag.StringVar(&dumpDirHost, "dumpdir-host", "/tmp/dumps", "Directory to store memory dumps on the host")
@@ -45,6 +47,11 @@ func main() {
 	flag.StringVar(&dumpTool, "dump-tool", "procdump", "Tool to use for memory dump (procdump or dotnet-dump)")
 
 	flag.Parse()
+
+	isPercentage = !strings.HasSuffix(strings.ToLower(threshold), "mb")
+	thresholdStr := strings.TrimSuffix(strings.ToLower(threshold), "%")
+	thresholdStr = strings.TrimSuffix(thresholdStr, "mb")
+	thresholdValue, _ = strconv.ParseFloat(thresholdStr, 64)
 
 	// Create a Unix socket HTTP client
 	client := &http.Client{
@@ -68,12 +75,20 @@ func main() {
 	}
 
 	dumpCounter := 0
+	_, totalMemory, _ := getContainerMemoryUsage(client, containerName, baseDockerURL, true)
+	var totalMemoryThreshold float64
+	if isPercentage {
+		totalMemoryThreshold = float64(totalMemory) * thresholdValue / 100
+	} else {
+		totalMemoryThreshold = thresholdValue
+		thresholdValue = thresholdValue / float64(totalMemory) * 100
+	}
+	fmt.Printf("Total memory threshold: %.0f%% (%.0f MB)\n", thresholdValue, totalMemoryThreshold)
 
 	for {
 		// Get memory usage
-		memUsagePercent, totalMemory, err := getContainerMemoryUsage(client, containerName, baseDockerURL)
-		totalMemoryThreshold := float64(totalMemory) * threshold / 100
-		fmt.Printf("Total memory threshold: %.0f%% (%.0f MB)\n", threshold, totalMemoryThreshold)
+		memUsagePercent, _, err := getContainerMemoryUsage(client, containerName, baseDockerURL, false)
+
 		if err != nil {
 			fmt.Println("Error getting memory usage:", err)
 			if !monitor {
@@ -85,7 +100,7 @@ func main() {
 
 		fmt.Printf("Memory usage is %.2f%%\n", memUsagePercent)
 
-		if memUsagePercent >= threshold {
+		if memUsagePercent >= thresholdValue {
 			fmt.Println("Memory usage threshold exceeded. Initiating memory dump...")
 
 			// Install dependencies inside the target container
@@ -117,7 +132,7 @@ func main() {
 
 			// Run the selected dump tool inside the target container
 			dumpFile := fmt.Sprintf("%s/core_%d_%d.dmp", dumpDirContainer, pid, time.Now().Unix())
-			dumpOutput, err := createMemoryDump(client, containerName, dumpTool, pid, dumpFile, totalMemoryThreshold, baseDockerURL)
+			dumpOutput, err := createMemoryDump(client, containerName, dumpTool, pid, dumpFile, totalMemoryThreshold, baseDockerURL, checkInterval)
 			if err != nil {
 				fmt.Println("Error creating dump:", err)
 				fmt.Printf("Command output: %s\n", dumpOutput)
@@ -129,9 +144,12 @@ func main() {
 
 			// Copy the dump file from the target container to the host
 			hostDumpFile := filepath.Join(dumpDirHost, filepath.Base(dumpFile))
-			err = copyFromContainer(client, containerName, dumpFile+"_0."+strconv.Itoa(pid), hostDumpFile, baseDockerURL)
+			if dumpTool == "procdump" {
+				dumpFile = dumpFile + "_0." + strconv.Itoa(pid)
+			}
+			err = copyFromContainer(client, containerName, dumpFile, hostDumpFile, baseDockerURL)
 			if err != nil {
-				fmt.Println("Error copying dump file ("+dumpFile+"_0."+strconv.Itoa(pid)+") to host:", err)
+				fmt.Println("Error copying dump file (dumpFile) to host:", err)
 				fmt.Printf("Command output: %s\n", dumpOutput)
 			} else {
 				fmt.Printf("Dump file copied to host: %s\n", hostDumpFile)
@@ -142,11 +160,13 @@ func main() {
 				fmt.Printf("Reached the limit of %d dumps. Stopping.\n", dumpsCount)
 				return
 			}
-		}
-
-		if !monitor {
-			fmt.Println("Dumping only once. Stopping.")
-			return
+		} else {
+			fmt.Printf("Memory usage (%.2f%%) is below the threshold (%.2f%%).\n", memUsagePercent, thresholdValue)
+			if !monitor {
+				fmt.Println("'-monitor' flag is set to false. Dumping only once. Stopping.")
+				return
+			}
+			fmt.Println("Waiting for memory usage to exceed the threshold...")
 		}
 
 		time.Sleep(checkInterval)
@@ -276,7 +296,7 @@ func copyFromContainer(client *http.Client, containerName, srcPath, dstPath, bas
 	return nil
 }
 
-func getContainerMemoryUsage(client *http.Client, containerID, baseDockerURL string) (float64, uint64, error) {
+func getContainerMemoryUsage(client *http.Client, containerID, baseDockerURL string, printStats bool) (float64, uint64, error) {
 	// Docker API endpoint for container stats
 	url := fmt.Sprintf("%s/containers/%s/stats?stream=false", baseDockerURL, containerID)
 
@@ -302,8 +322,10 @@ func getContainerMemoryUsage(client *http.Client, containerID, baseDockerURL str
 
 	// Calculate memory usage percentage
 	memUsage := float64(stats.MemoryStats.Usage) / float64(stats.MemoryStats.Limit) * 100
+	if printStats {
+		fmt.Printf("Docker RAM limit: %d MB\n", stats.MemoryStats.Limit/1024/1024)
+	}
 	fmt.Printf("Container memory usage: %d MB\n", stats.MemoryStats.Usage/1024/1024)
-	fmt.Printf("Docker RAM limit: %d MB\n", stats.MemoryStats.Limit/1024/1024)
 	return memUsage, stats.MemoryStats.Limit / 1024 / 1024, nil
 }
 
@@ -349,7 +371,7 @@ func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL
 	return nil
 }
 
-func createMemoryDump(client *http.Client, containerName, dumpTool string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string) (string, error) {
+func createMemoryDump(client *http.Client, containerName, dumpTool string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string, checkInterval time.Duration) (string, error) {
 	var cmd []string
 	switch dumpTool {
 	case "procdump":
@@ -357,15 +379,15 @@ func createMemoryDump(client *http.Client, containerName, dumpTool string, pid i
 		return execInContainer(client, containerName, baseDockerURL, cmd...)
 	case "dotnet-dump":
 		// Create a wrapper function to check memory usage before running dotnet-dump
-		return createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, baseDockerURL)
+		return createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, baseDockerURL, checkInterval)
 	default:
 		return "", errors.New("unsupported dump tool")
 	}
 }
 
-func createDotnetDump(client *http.Client, containerName string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string) (string, error) {
+func createDotnetDump(client *http.Client, containerName string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string, checkInterval time.Duration) (string, error) {
 	for {
-		memUsagePercent, memoryUsageMB, err := getContainerMemoryUsage(client, containerName, baseDockerURL)
+		memUsagePercent, memoryUsageMB, err := getContainerMemoryUsage(client, containerName, baseDockerURL, false)
 		if err != nil {
 			return "", fmt.Errorf("failed to get memory usage: %v", err)
 		}
@@ -381,6 +403,6 @@ func createDotnetDump(client *http.Client, containerName string, pid int, dumpFi
 				totalMemoryThreshold)
 		}
 
-		time.Sleep(1 * time.Second)
+		time.Sleep(checkInterval)
 	}
 }

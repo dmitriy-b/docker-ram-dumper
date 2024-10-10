@@ -33,7 +33,7 @@ format: ## Run gofumpt against code to format it
 staticcheck: ## Run staticcheck against code
 	@staticcheck ./...
 
-test: generate ## Run tests
+test: generate build-docker-test ## Run tests
 	@go clean -testcache 
 	@go test ./...
 
