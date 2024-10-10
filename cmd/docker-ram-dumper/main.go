@@ -31,6 +31,7 @@ func main() {
 		cleanup          bool
 		baseDockerURL    string
 		dumpTool         string
+		globalTimeout    time.Duration
 	)
 
 	flag.StringVar(&threshold, "threshold", "90%", "Memory usage threshold (e.g., '90%' or '1000MB')")
@@ -44,6 +45,7 @@ func main() {
 	flag.BoolVar(&cleanup, "cleanup", false, "Clean up dumps in container after a memory dump")
 	flag.StringVar(&baseDockerURL, "docker-url", "http://localhost", "Base URL for Docker API")
 	flag.StringVar(&dumpTool, "dump-tool", "procdump", "Tool to use for memory dump (procdump or dotnet-dump)")
+	flag.DurationVar(&globalTimeout, "timeout", 0, "Global timeout for the application (e.g., 1h, 30m, 1h30m)")
 
 	flag.Parse()
 
@@ -84,91 +86,110 @@ func main() {
 	}
 	fmt.Printf("Total memory threshold: %.0f%% (%.0f MB)\n", thresholdValue, totalMemoryThreshold)
 
+	if monitor && globalTimeout == 0 {
+		fmt.Println("Global timeout is not set. Setting it to 10 minutes. Use -timeout flag to set a different timeout.")
+		globalTimeout = 10 * time.Minute
+	}
+
+	// Create a context with the global timeout
+	ctx := context.Background()
+	if globalTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, globalTimeout)
+		defer cancel()
+	}
+
 	for {
-		// Get memory usage
-		memUsagePercent, _, err := helpers.GetContainerMemoryUsage(client, containerName, baseDockerURL, false)
+		select {
+		case <-ctx.Done():
+			fmt.Printf("Global timeout: %v reached. Use -timeout flag to set a different timeout. Exiting. \n", globalTimeout)
+			return
+		default:
+			// Get memory usage
+			memUsagePercent, _, err := helpers.GetContainerMemoryUsage(client, containerName, baseDockerURL, false)
 
-		if err != nil {
-			fmt.Println("Error getting memory usage:", err)
-			if !monitor {
-				return
+			if err != nil {
+				fmt.Println("Error getting memory usage:", err)
+				if !monitor {
+					fmt.Println("'-monitor' flag is set to false. Stopping.")
+					return
+				}
+				time.Sleep(checkInterval)
+				continue
 			}
+
+			fmt.Printf("Memory usage is %.2f%%\n", memUsagePercent)
+
+			if memUsagePercent >= thresholdValue {
+				fmt.Println("Memory usage threshold exceeded. Initiating memory dump...")
+
+				// Install dependencies inside the target container
+				err := installDumpTool(client, containerName, dumpTool, baseDockerURL)
+				if err != nil {
+					fmt.Println("Error installing dump tool:", err)
+					time.Sleep(checkInterval)
+					continue
+				}
+
+				// Get the PID of the processName process inside the target container
+				pid, err := helpers.GetPIDInContainer(client, containerName, processName, baseDockerURL)
+				if err != nil {
+					fmt.Println("Error getting PID:", err)
+					time.Sleep(checkInterval)
+					continue
+				} else {
+					fmt.Printf("PID of %s is %d\n", processName, pid)
+				}
+
+				// Create a dump directory inside the container
+				_, err = helpers.ExecInContainer(client, containerName, baseDockerURL, "mkdir", "-p", "/tmp/dumps")
+				if err != nil {
+					fmt.Println("Error creating dump directory in container:", err)
+					time.Sleep(checkInterval)
+					return
+				}
+
+				// Run the selected dump tool inside the target container
+				dumpFile := fmt.Sprintf("%s/core_%d_%d.dmp", dumpDirContainer, pid, time.Now().Unix())
+				dumpOutput, err := createMemoryDump(client, containerName, dumpTool, pid, dumpFile, totalMemoryThreshold, baseDockerURL, checkInterval)
+				if err != nil {
+					fmt.Println("Error creating dump:", err)
+					fmt.Printf("Command output: %s\n", dumpOutput)
+					time.Sleep(checkInterval)
+					continue
+				}
+
+				fmt.Printf("Memory dump saved to %s inside the target container.\n", dumpFile)
+
+				// Copy the dump file from the target container to the host
+				hostDumpFile := filepath.Join(dumpDirHost, filepath.Base(dumpFile))
+				if dumpTool == "procdump" {
+					dumpFile = dumpFile + "_0." + strconv.Itoa(pid)
+				}
+				err = helpers.CopyFromContainer(client, containerName, dumpFile, hostDumpFile, baseDockerURL)
+				if err != nil {
+					fmt.Println("Error copying dump file (dumpFile) to host:", err)
+					fmt.Printf("Command output: %s\n", dumpOutput)
+				} else {
+					fmt.Printf("Dump file copied to host: %s\n", hostDumpFile)
+				}
+
+				dumpCounter++
+				if dumpCounter >= dumpsCount {
+					fmt.Printf("Reached the limit of %d dumps. Stopping.\n", dumpsCount)
+					return
+				}
+			} else {
+				fmt.Printf("Memory usage (%.2f%%) is below the threshold (%.2f%%).\n", memUsagePercent, thresholdValue)
+				if !monitor {
+					fmt.Println("'-monitor' flag is set to false. Dumping only once. Stopping.")
+					return
+				}
+				fmt.Println("Waiting for memory usage to exceed the threshold...")
+			}
+
 			time.Sleep(checkInterval)
-			continue
 		}
-
-		fmt.Printf("Memory usage is %.2f%%\n", memUsagePercent)
-
-		if memUsagePercent >= thresholdValue {
-			fmt.Println("Memory usage threshold exceeded. Initiating memory dump...")
-
-			// Install dependencies inside the target container
-			err := installDumpTool(client, containerName, dumpTool, baseDockerURL)
-			if err != nil {
-				fmt.Println("Error installing dump tool:", err)
-				time.Sleep(checkInterval)
-				continue
-			}
-
-			// Get the PID of the processName process inside the target container
-			pid, err := helpers.GetPIDInContainer(client, containerName, processName, baseDockerURL)
-			if err != nil {
-				fmt.Println("Error getting PID:", err)
-				time.Sleep(checkInterval)
-				continue
-			} else {
-				fmt.Printf("PID of %s is %d\n", processName, pid)
-			}
-
-			// Create a dump directory inside the container
-			_, err = helpers.ExecInContainer(client, containerName, baseDockerURL, "mkdir", "-p", "/tmp/dumps")
-			if err != nil {
-				fmt.Println("Error creating dump directory in container:", err)
-				time.Sleep(checkInterval)
-				// continue
-				return
-			}
-
-			// Run the selected dump tool inside the target container
-			dumpFile := fmt.Sprintf("%s/core_%d_%d.dmp", dumpDirContainer, pid, time.Now().Unix())
-			dumpOutput, err := createMemoryDump(client, containerName, dumpTool, pid, dumpFile, totalMemoryThreshold, baseDockerURL, checkInterval)
-			if err != nil {
-				fmt.Println("Error creating dump:", err)
-				fmt.Printf("Command output: %s\n", dumpOutput)
-				time.Sleep(checkInterval)
-				continue
-			}
-
-			fmt.Printf("Memory dump saved to %s inside the target container.\n", dumpFile)
-
-			// Copy the dump file from the target container to the host
-			hostDumpFile := filepath.Join(dumpDirHost, filepath.Base(dumpFile))
-			if dumpTool == "procdump" {
-				dumpFile = dumpFile + "_0." + strconv.Itoa(pid)
-			}
-			err = helpers.CopyFromContainer(client, containerName, dumpFile, hostDumpFile, baseDockerURL)
-			if err != nil {
-				fmt.Println("Error copying dump file (dumpFile) to host:", err)
-				fmt.Printf("Command output: %s\n", dumpOutput)
-			} else {
-				fmt.Printf("Dump file copied to host: %s\n", hostDumpFile)
-			}
-
-			dumpCounter++
-			if dumpCounter >= dumpsCount {
-				fmt.Printf("Reached the limit of %d dumps. Stopping.\n", dumpsCount)
-				return
-			}
-		} else {
-			fmt.Printf("Memory usage (%.2f%%) is below the threshold (%.2f%%).\n", memUsagePercent, thresholdValue)
-			if !monitor {
-				fmt.Println("'-monitor' flag is set to false. Dumping only once. Stopping.")
-				return
-			}
-			fmt.Println("Waiting for memory usage to exceed the threshold...")
-		}
-
-		time.Sleep(checkInterval)
 	}
 }
 

@@ -57,6 +57,7 @@ Run the tool with the following command:
 - `-cleanup`: Clean up dumps in container after copying memory dump to host (default false)
 - `-base-docker-url string`: Base Docker URL (default "http://localhost")
 - `-dump-tool string`: Tool to use for memory dump, `procdump` or `dotnet-dump` (default "procdump")
+- `-timeout duration`: Global timeout for the tool to exit (default 0 or 10 minutes if -monitor is set)
 
 ### Example
 
