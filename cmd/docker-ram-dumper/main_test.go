@@ -121,6 +121,11 @@ func TestCleanupDumps(t *testing.T) {
 	if err != nil {
 		t.Errorf("cleanupDumps failed: %v", err)
 	}
+
+	expectedOutput := fmt.Sprintf("rm -rf %s", dumpDirContainer)
+	if string(testBodyOutput) != expectedOutput {
+		t.Errorf("Unexpected output: got %q, want %q", string(testBodyOutput), expectedOutput)
+	}
 }
 
 func TestExecInContainer(t *testing.T) {
@@ -132,8 +137,15 @@ func TestExecInContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
+	// Test output
 	if result != "Command output" {
 		t.Errorf("Expected 'Command output', got %s", result)
+	}
+
+	// Test input
+	expectedOutput := "test command"
+	if string(testBodyOutput) != expectedOutput {
+		t.Errorf("Unexpected output: got %q, want %q", string(testBodyOutput), expectedOutput)
 	}
 }
 
