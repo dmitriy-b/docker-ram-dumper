@@ -123,7 +123,7 @@ func main() {
 				fmt.Println("Memory usage threshold exceeded. Initiating memory dump...")
 
 				// Install dependencies inside the target container
-				err := installDumpTool(client, containerName, dumpTool, baseDockerURL)
+				_, err := installDumpTool(client, containerName, dumpTool, baseDockerURL)
 				if err != nil {
 					fmt.Println("Error installing dump tool:", err)
 					time.Sleep(checkInterval)
@@ -202,38 +202,41 @@ func cleanupDumps(client *http.Client, containerName, dumpDirContainer, baseDock
 	return nil
 }
 
-func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL string) error {
+func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL string) (string, error) {
 	switch dumpTool {
 	case "procdump":
 		// Check if procdump is already installed
-		_, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "which", "procdump")
+		which, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "which", "procdump")
 		if err != nil {
 			fmt.Println("Procdump not found. Installing...")
-			_, err = helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apk add --no-cache procdump || apt-get update && apt-get install -y procdump")
+			result, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apk add --no-cache procdump || apt-get update && apt-get install -y procdump")
 			if err != nil {
-				return fmt.Errorf("error installing procdump: %v", err)
+				return "", fmt.Errorf("error installing procdump: %v", err)
 			}
 			fmt.Println("Procdump installed successfully.")
+			return result, nil
 		} else {
 			fmt.Println("Procdump is already installed.")
+			return which, nil
 		}
 	case "dotnet-dump":
 		// Check if dotnet-dump is already installed
-		_, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "which", "dotnet-dump")
+		which, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "which", "dotnet-dump")
 		if err != nil {
 			fmt.Println("dotnet-dump not found. Installing...")
-			_, err = helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y curl && curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 7.0 --install-dir /root/.dotnet && dotnet tool install --global dotnet-dump")
+			result, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y curl && curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 7.0 --install-dir /root/.dotnet && dotnet tool install --global dotnet-dump")
 			if err != nil {
-				return fmt.Errorf("error installing dotnet-dump: %v", err)
+				return "", fmt.Errorf("error installing dotnet-dump: %v", err)
 			}
 			fmt.Println("dotnet-dump installed successfully.")
+			return result, nil
 		} else {
 			fmt.Println("dotnet-dump is already installed.")
+			return which, nil
 		}
 	default:
-		return fmt.Errorf("unsupported dump tool: %s", dumpTool)
+		return "", fmt.Errorf("unsupported dump tool: %s", dumpTool)
 	}
-	return nil
 }
 
 func createMemoryDump(client *http.Client, containerName, dumpTool string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string, checkInterval time.Duration) (string, error) {

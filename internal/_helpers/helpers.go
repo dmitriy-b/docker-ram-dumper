@@ -142,7 +142,7 @@ type DockerStats struct {
 	} `json:"memory_stats"`
 }
 
-func GetContainerMemoryUsage(client *http.Client, containerID, baseDockerURL string, printStats bool) (float64, uint64, error) {
+var GetContainerMemoryUsage = func(client *http.Client, containerID, baseDockerURL string, printStats bool) (float64, uint64, error) {
 	// Docker API endpoint for container stats
 	url := fmt.Sprintf("%s/containers/%s/stats?stream=false", baseDockerURL, containerID)
 
@@ -175,7 +175,7 @@ func GetContainerMemoryUsage(client *http.Client, containerID, baseDockerURL str
 	return memUsage, stats.MemoryStats.Limit / 1024 / 1024, nil
 }
 
-func ExecInContainer(client *http.Client, containerName, baseDockerURL string, command ...string) (string, error) {
+var ExecInContainer = func(client *http.Client, containerName, baseDockerURL string, command ...string) (string, error) {
 	// Prepare the command execution request
 	execConfig := map[string]interface{}{
 		"AttachStdout": true,

@@ -1,12 +1,55 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	helpers "github.com/NethermindEth/docker-ram-dumper/internal/_helpers"
 )
+
+var testBodyOutput []byte
+
+func mockExecInContainer(output string) (*httptest.Server, *http.Client) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/containers/test-container/exec":
+			w.WriteHeader(http.StatusCreated)
+
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Error reading body", http.StatusInternalServerError)
+				return
+			}
+			testBodyOutput = body
+
+			// Decode the body into execConfig
+			var execConfig struct {
+				Cmd []string `json:"Cmd"`
+			}
+			if err := json.Unmarshal(body, &execConfig); err != nil {
+				http.Error(w, "Failed to decode JSON", http.StatusBadRequest)
+				return
+			}
+			// Store the Cmd as a JSON string in testBodyOutput
+			testBodyOutput = []byte(strings.Join(execConfig.Cmd, " "))
+			w.Write([]byte(`{"Id":"test-exec-id"}`))
+		case "/exec/test-exec-id/start":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(output))
+		default:
+			http.Error(w, "Not found", http.StatusNotFound)
+		}
+	}))
+	client := server.Client()
+
+	return server, client
+}
 
 func TestGetContainerMemoryUsage(t *testing.T) {
 	// Create a mock HTTP server
@@ -48,23 +91,8 @@ func TestGetContainerMemoryUsage(t *testing.T) {
 
 func TestGetPIDInContainer(t *testing.T) {
 	// Create a mock HTTP server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate Docker API response for exec creation
-		if r.URL.Path == "/containers/test-container/exec" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			w.Write([]byte(`{"Id": "exec123"}`))
-		} else if r.URL.Path == "/exec/exec123/start" {
-			// Simulate Docker API response for exec start
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("1234 root      0:00 test-process\n"))
-		}
-	}))
+	server, client := mockExecInContainer("1234 root      0:00 test-process\n")
 	defer server.Close()
-
-	// Create a client that uses the mock server
-	client := server.Client()
 
 	// Use the mock server URL instead of the default Docker API endpoint
 	dockerAPIEndpoint := server.URL
@@ -82,27 +110,9 @@ func TestGetPIDInContainer(t *testing.T) {
 }
 
 func TestCleanupDumps(t *testing.T) {
-	// Mock HTTP server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/containers/test-container/exec":
-			// Simulate Docker API response for exec creation
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			w.Write([]byte(`{"Id":"test-exec-id"}`))
-		case "/exec/test-exec-id/start":
-			// Simulate Docker API response for exec start
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			// The actual response body is not used in the cleanupDumps function
-			w.Write([]byte(`{}`))
-		default:
-			http.Error(w, "Not found", http.StatusNotFound)
-		}
-	}))
+	server, client := mockExecInContainer("Command output")
 	defer server.Close()
 
-	client := server.Client()
 	containerName := "test-container"
 	dumpDirContainer := "/tmp/dumps"
 	baseDockerURL := server.URL
@@ -114,30 +124,186 @@ func TestCleanupDumps(t *testing.T) {
 }
 
 func TestExecInContainer(t *testing.T) {
-	// Mock HTTP server
+	server, client := mockExecInContainer("Command output")
+	defer server.Close()
+
+	// Use the test server URL as the baseDockerURL
+	result, err := helpers.ExecInContainer(client, "test-container", server.URL, "test", "command")
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if result != "Command output" {
+		t.Errorf("Expected 'Command output', got %s", result)
+	}
+}
+
+func TestCreateDotnetDump(t *testing.T) {
+	server, client := mockExecInContainer("Dotnet-dump output")
+	defer server.Close()
+
+	// Mock GetContainerMemoryUsage function
+	originalGetContainerMemoryUsage := helpers.GetContainerMemoryUsage
+	helpers.GetContainerMemoryUsage = func(client *http.Client, containerName, baseDockerURL string, getTotalMemory bool) (float64, uint64, error) {
+		return 95.0, 1900, nil // Simulating memory usage above threshold
+	}
+	defer func() {
+		helpers.GetContainerMemoryUsage = originalGetContainerMemoryUsage
+	}()
+
+	containerName := "test-container"
+	pid := 1234
+	dumpFile := "/tmp/dumps/test.dmp"
+	totalMemoryThreshold := 1800.0
+	checkInterval := 1 * time.Second
+
+	output, err := createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, server.URL, checkInterval)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	expectedOutput := "Dotnet-dump output"
+	if output != expectedOutput {
+		t.Errorf("Unexpected output: got %q, want %q", output, expectedOutput)
+	}
+}
+
+func TestCreateMemoryDumpProcdump(t *testing.T) {
+	server, client := mockExecInContainer("procdump output")
+	defer server.Close()
+
+	originalExecInContainer := helpers.ExecInContainer
+	helpers.ExecInContainer = func(client *http.Client, containerName, baseDockerURL string, command ...string) (string, error) {
+		return strings.Join(command, " "), nil
+	}
+	defer func() {
+		helpers.ExecInContainer = originalExecInContainer
+	}()
+
+	containerName := "test-container"
+	pid := 1234
+	dumpFile := "/tmp/dumps/test.dmp"
+	totalMemoryThreshold := 1800.0
+	checkInterval := 1 * time.Second
+
+	output, err := createMemoryDump(client, containerName, "procdump", pid, dumpFile, totalMemoryThreshold, server.URL, checkInterval)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	expectedOutput := fmt.Sprintf("procdump -d -n 1 -s 1 -M %d -p %d -o %s", int(totalMemoryThreshold), int(pid), dumpFile)
+	if output != expectedOutput {
+		t.Errorf("Unexpected output: got %q, want %q", output, expectedOutput)
+	}
+}
+
+func TestCreateMemoryDumpDotnetMemory(t *testing.T) {
+	server, client := mockExecInContainer("Dotnet-dump output")
+	defer server.Close()
+	// Mock GetContainerMemoryUsage function
+	originalGetContainerMemoryUsage := helpers.GetContainerMemoryUsage
+	helpers.GetContainerMemoryUsage = func(client *http.Client, containerName, baseDockerURL string, getTotalMemory bool) (float64, uint64, error) {
+		return 95.0, 1900, nil // Simulating memory usage above threshold
+	}
+
+	originalExecInContainer := helpers.ExecInContainer
+	helpers.ExecInContainer = func(client *http.Client, containerName, baseDockerURL string, command ...string) (string, error) {
+		return strings.Join(command, " "), nil
+	}
+	defer func() {
+		helpers.GetContainerMemoryUsage = originalGetContainerMemoryUsage
+		helpers.ExecInContainer = originalExecInContainer
+	}()
+
+	containerName := "test-container"
+	pid := 1234
+	dumpFile := "/tmp/dumps/test.dmp"
+	totalMemoryThreshold := 1800.0
+	checkInterval := 1 * time.Second
+
+	output, err := createMemoryDump(client, containerName, "dotnet-dump", pid, dumpFile, totalMemoryThreshold, server.URL, checkInterval)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	expectedOutput := fmt.Sprintf("/root/.dotnet/tools/dotnet-dump collect -p %d -o %s", pid, dumpFile)
+	if output != expectedOutput {
+		t.Errorf("Unexpected output: got %q, want %q", output, expectedOutput)
+	}
+}
+
+func TestInstallDumpToolProcdumpNotInstalled(t *testing.T) {
+	server, client := mockExecInContainer("")
+	defer server.Close()
+
+	originalExecInContainer := helpers.ExecInContainer
+	helpers.ExecInContainer = func(client *http.Client, containerName, baseDockerURL string, command ...string) (string, error) {
+		return strings.Join(command, " "), nil
+	}
+	defer func() {
+		helpers.ExecInContainer = originalExecInContainer
+	}()
+
+	containerName := "test-container"
+
+	output, err := installDumpTool(client, containerName, "procdump", server.URL)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	expectedOutput := "which procdump"
+
+	if output != expectedOutput {
+		t.Errorf("Unexpected output: got %q, want %q", output, expectedOutput)
+	}
+}
+
+func TestInstallDumpToolProcdumpInstalled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/containers/test-container/exec":
 			w.WriteHeader(http.StatusCreated)
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Error reading body", http.StatusInternalServerError)
+				return
+			}
+			if strings.Contains(string(body), "which") {
+				http.Error(w, "Not found", http.StatusNotFound)
+				return
+			}
 			w.Write([]byte(`{"Id":"test-exec-id"}`))
+			// Store the raw body in testBodyOutput
+			testBodyOutput = body
+
+			// Decode the body into execConfig
+			var execConfig struct {
+				Cmd []string `json:"Cmd"`
+			}
+			if err := json.Unmarshal(body, &execConfig); err != nil {
+				http.Error(w, "Failed to decode JSON", http.StatusBadRequest)
+				return
+			}
+			// Store the Cmd as a JSON string in testBodyOutput
+			testBodyOutput = []byte(strings.Join(execConfig.Cmd, " "))
 		case "/exec/test-exec-id/start":
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("Command output"))
+			w.Write([]byte(`{}`))
 		default:
 			http.Error(w, "Not found", http.StatusNotFound)
 		}
 	}))
 	defer server.Close()
-
 	client := server.Client()
-	containerName := "test-container"
-	baseDockerURL := server.URL
 
-	output, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "test", "command")
+	containerName := "test-container"
+
+	_, err := installDumpTool(client, containerName, "procdump", server.URL)
 	if err != nil {
-		t.Errorf("execInContainer failed: %v", err)
+		t.Errorf("Unexpected error: %v", err)
 	}
-	if output != "Command output" {
-		t.Errorf("Unexpected output: got %q, want %q", output, "Command output")
+
+	expectedOutput := "sh -c apk add --no-cache procdump || apt-get update && apt-get install -y procdump"
+	if string(testBodyOutput) != expectedOutput {
+		t.Errorf("Unexpected output: got %q, want %q", string(testBodyOutput), expectedOutput)
 	}
 }
