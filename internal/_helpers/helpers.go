@@ -46,11 +46,11 @@ func StartTestContainer(t *testing.T) string {
 	return resp.ID
 }
 
-func RunStressCommand(containerID string, vmBytes string, timeout string) error {
+func RunStressCommand(containerID string, vmBytes string, timeout string) ([]byte, error) {
 	ctx := context.Background()
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %v", err)
+		return nil, fmt.Errorf("failed to create Docker client: %v", err)
 	}
 
 	cmd := []string{
@@ -68,27 +68,27 @@ func RunStressCommand(containerID string, vmBytes string, timeout string) error 
 
 	execID, err := cli.ContainerExecCreate(ctx, containerID, execConfig)
 	if err != nil {
-		return fmt.Errorf("failed to create exec : %v", err)
+		return nil, fmt.Errorf("failed to create exec : %v", err)
 	}
 
 	resp, err := cli.ContainerExecAttach(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to attach to exec: %v", err)
+		return nil, fmt.Errorf("failed to attach to exec: %v", err)
 	}
 	defer resp.Close()
 
-	_, err = io.ReadAll(resp.Reader)
+	output, err := io.ReadAll(resp.Reader)
 	if err != nil {
-		return fmt.Errorf("failed to read exec output: %v", err)
+		return nil, fmt.Errorf("failed to read exec output: %v", err)
 	}
 
 	err = cli.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to start exec: %v", err)
+		return nil, fmt.Errorf("failed to start exec: %v", err)
 	}
 
 	time.Sleep(5 * time.Second)
-	return nil
+	return output, nil
 }
 
 func StopAndRemoveContainer(t *testing.T, containerID string) {

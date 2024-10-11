@@ -3,8 +3,8 @@ package integration_test
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"testing"
-	"time"
 
 	helpers "github.com/NethermindEth/docker-ram-dumper/internal/_helpers"
 )
@@ -15,8 +15,8 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	// Clean up
-	defer helpers.RemoveTestContainer()
+	// Setup
+	cleanup()
 
 	// Ensure dump directory exists
 	err := os.MkdirAll(testDumpsDir, dirPerms)
@@ -27,8 +27,16 @@ func TestMain(m *testing.M) {
 
 	// Run the tests
 	code := m.Run()
+	// Teardown
+	cleanup()
 
 	os.Exit(code)
+}
+
+func cleanup() {
+	// Remove the test container if it exists
+	cmd := exec.Command("docker", "rm", "-f", helpers.TestContainerName)
+	cmd.Run() // Ignore errors, as the container might not exist
 }
 
 func TestMemoryDumper(t *testing.T) {
@@ -39,37 +47,14 @@ func TestMemoryDumper(t *testing.T) {
 	defer os.RemoveAll(testDumpsDir)
 
 	// Run the memory stress command in the background
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- helpers.RunStressCommand(containerID, "50%", "15s")
-	}()
-	time.Sleep(5 * time.Second)
+	runDockerStressCommandAsync(containerID, "50%", "15s")
 
-	// Run your main program inside a Docker container in parallel
-	outputCh := make(chan []byte, 1)
-	go func() {
-		output, err := helpers.RunDockerRamDumper(map[string]string{
-			"threshold": "1",
-			"process":   "stress-ng-vm",
-			"container": helpers.TestContainerName,
-		})
-		if err != nil {
-			errCh <- fmt.Errorf("Failed to run main program: %v\nOutput: %s", err, output)
-			return
-		}
-		outputCh <- output
-	}()
-
-	// Check for errors from the goroutines
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("runStressCommand or main program failed: %v", err)
-		}
-	case output := <-outputCh:
-		t.Logf("docker-ram-dumper output: %s", output)
+	flags := map[string]string{
+		"threshold": "1",
+		"process":   "stress-ng-vm",
+		"container": helpers.TestContainerName,
 	}
-
+	runDockerRamDumperAsync(flags, t)
 	// Check if the dump file was created
 	checkDumpFiles(t, 1)
 }
@@ -82,36 +67,14 @@ func TestMemoryDumperNegativeScenario(t *testing.T) {
 	defer os.RemoveAll(testDumpsDir)
 
 	// Run the memory stress command in the background
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- helpers.RunStressCommand(containerID, "50%", "15s")
-	}()
-	time.Sleep(5 * time.Second)
+	runDockerStressCommandAsync(containerID, "50%", "15s")
 
-	// Run your main program inside a Docker container in parallel
-	outputCh := make(chan []byte, 1)
-	go func() {
-		output, err := helpers.RunDockerRamDumper(map[string]string{
-			"threshold": "60",
-			"process":   "stress-ng-vm",
-			"container": helpers.TestContainerName,
-		})
-		if err != nil {
-			errCh <- fmt.Errorf("Failed to run main program: %v\nOutput: %s", err, output)
-			return
-		}
-		outputCh <- output
-	}()
-
-	// Check for errors from the goroutines
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("runStressCommand or main program failed: %v", err)
-		}
-	case output := <-outputCh:
-		t.Logf("docker-ram-dumper output: %s", output)
+	flags := map[string]string{
+		"threshold": "60",
+		"process":   "stress-ng-vm",
+		"container": helpers.TestContainerName,
 	}
+	runDockerRamDumperAsync(flags, t)
 
 	// Check if the dump file was created
 	checkDumpFiles(t, 0)
@@ -126,4 +89,46 @@ func checkDumpFiles(t *testing.T, filesCount int) {
 	if len(dumpFiles) != filesCount {
 		t.Errorf("Expected %d dump files, but found %d", filesCount, len(dumpFiles))
 	}
+}
+
+func runDockerRamDumperAsync(flags map[string]string, t *testing.T) (chan []byte, chan error) {
+	outputCh := make(chan []byte, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		output, err := helpers.RunDockerRamDumper(flags)
+		if err != nil {
+			errCh <- fmt.Errorf("Failed to run main program: %v\nOutput: %s", err, output)
+			return
+		}
+		outputCh <- output
+	}()
+	// Check for errors from the goroutines
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("runStressCommand or main program failed: %v", err)
+		}
+	case output := <-outputCh:
+		t.Logf("docker-ram-dumper output: %s", output)
+	}
+
+	return outputCh, errCh
+}
+
+func runDockerStressCommandAsync(containerID string, vmBytes string, timeout string) (chan []byte, chan error) {
+	errCh := make(chan error, 1)
+	var output []byte
+	go func() {
+		var err error
+		output, err = helpers.RunStressCommand(containerID, vmBytes, timeout)
+		errCh <- err
+	}()
+
+	outputCh := make(chan []byte, 1)
+	go func() {
+		outputCh <- output
+	}()
+
+	return outputCh, errCh
 }
