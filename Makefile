@@ -28,7 +28,9 @@ gomod_tidy: ## Run go mod tidy to clean up & install dependencies
 	@go mod tidy
 
 format: ## Run gofumpt against code to format it
-	@gofumpt -l -w .
+	@gofumpt -l -w cmd/
+	@gofumpt -l -w internal/
+	@gofumpt -l -w test/
 
 staticcheck: ## Run staticcheck against code
 	@staticcheck ./...
