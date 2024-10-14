@@ -9,6 +9,19 @@ import (
 	helpers "github.com/NethermindEth/docker-ram-dumper/internal/_helpers"
 )
 
+// - `-threshold float`: Memory usage threshold percentage (default 90.0)
+// - `-process string`: Name of the process to monitor (default "dotnet")
+// - `-dumpdir-container string`: Directory to store memory dumps inside the container (default "/tmp/dumps")
+// - `-dumpdir-host string`: Directory to store memory dumps on the host (default "/tmp/dumps")
+// - `-container string`: Name of the container to monitor (default "sedge-node")
+// - `-interval duration`: Interval between memory checks (default 30s)
+// - `-monitor`: Continuously monitor memory usage (default false)
+// - `-dumps-count int`: Number of memory dumps to create before stopping (default 1)
+// - `-cleanup`: Clean up dumps in container after copying memory dump to host (default false)
+// - `-base-docker-url string`: Base Docker URL (default "http://localhost")
+// - `-dump-tool string`: Tool to use for memory dump, `procdump` or `dotnet-dump` (default "procdump")
+// - `-timeout duration`: Global timeout for the tool to exit (default 0 or 10 minutes if -monitor is set)
+
 const (
 	testDumpsDir = "/tmp/test-dumps"
 	dirPerms     = 0o755
@@ -78,6 +91,48 @@ func TestMemoryDumperNegativeScenario(t *testing.T) {
 
 	// Check if the dump file was created
 	checkDumpFiles(t, 0)
+}
+
+func TestDefaultThreasholdScenario(t *testing.T) {
+	// Start the test container
+	containerID := helpers.StartTestContainer(t)
+	defer helpers.StopAndRemoveContainer(t, containerID)
+	// Clean up the test dumps
+	defer os.RemoveAll(testDumpsDir)
+
+	// Run the memory stress command in the background
+	runDockerStressCommandAsync(containerID, "50%", "15s")
+
+	flags := map[string]string{
+		"process":   "stress-ng-vm",
+		"container": helpers.TestContainerName,
+	}
+	runDockerRamDumperAsync(flags, t)
+
+	// Check if the dump file was created
+	// Shold not create dump file because threshold is 90% by default
+	checkDumpFiles(t, 0)
+}
+
+func TestThreasholdMBScenario(t *testing.T) {
+	// Start the test container
+	containerID := helpers.StartTestContainer(t)
+	defer helpers.StopAndRemoveContainer(t, containerID)
+	// Clean up the test dumps
+	defer os.RemoveAll(testDumpsDir)
+
+	// Run the memory stress command in the background
+	runDockerStressCommandAsync(containerID, "10%", "15s")
+
+	flags := map[string]string{
+		"threshold": "10MB",
+		"process":   "stress-ng-vm",
+		"container": helpers.TestContainerName,
+	}
+	runDockerRamDumperAsync(flags, t)
+
+	// Check if the dump file was created
+	checkDumpFiles(t, 1)
 }
 
 func checkDumpFiles(t *testing.T, filesCount int) {
