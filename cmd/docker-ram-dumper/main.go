@@ -102,7 +102,8 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Printf("Global timeout: %v reached. Use -timeout flag to set a different timeout. Exiting. \n", globalTimeout)
+			fmt.Printf("Global timeout: %v has been reached. Use -timeout flag to increase the timeout. Exiting the loop... \n", globalTimeout)
+			fmt.Println("Goodbye!")
 			return
 		default:
 			// Get memory usage
@@ -185,6 +186,7 @@ func main() {
 					return
 				}
 				fmt.Println("Waiting for memory usage to exceed the threshold...")
+				fmt.Println("___")
 			}
 
 			time.Sleep(checkInterval)
@@ -224,7 +226,7 @@ func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL
 		which, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "which", "dotnet-dump")
 		if err != nil {
 			fmt.Println("dotnet-dump not found. Installing...")
-			result, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y curl && curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 7.0 --install-dir /root/.dotnet && dotnet tool install --global dotnet-dump")
+			result, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y dotnet-sdk-8.0 curl && curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 8.0 --install-dir /root/.dotnet && dotnet tool install --global dotnet-dump")
 			if err != nil {
 				return "", fmt.Errorf("error installing dotnet-dump: %v", err)
 			}
