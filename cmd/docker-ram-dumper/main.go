@@ -223,7 +223,7 @@ func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL
 		}
 	case "dotnet-dump":
 		// Check if dotnet-dump is already installed
-		which, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "which", "dotnet-dump")
+		which, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "ls", "/root/.dotnet/tools/dotnet-dump")
 		if err != nil {
 			fmt.Println("dotnet-dump not found. Installing...")
 			result, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y dotnet-sdk-8.0 curl && curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh && chmod +x dotnet-install.sh && ./dotnet-install.sh --channel 8.0 --install-dir /root/.dotnet && dotnet tool install --global dotnet-dump")
