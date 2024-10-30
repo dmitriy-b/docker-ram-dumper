@@ -218,7 +218,7 @@ func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL
 			fmt.Println("Procdump installed successfully.")
 			return result, nil
 		} else {
-			fmt.Println("Procdump is already installed.")
+			fmt.Printf("Procdump is already installed: %s\n", which)
 			return which, nil
 		}
 	case "dotnet-dump":
@@ -233,7 +233,7 @@ func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL
 			fmt.Println("dotnet-dump installed successfully.")
 			return result, nil
 		} else {
-			fmt.Println("dotnet-dump is already installed.")
+			fmt.Printf("dotnet-dump is already installed: %s\n", which)
 			return which, nil
 		}
 	default:
