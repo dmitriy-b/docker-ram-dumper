@@ -211,8 +211,8 @@ EOF
 RUN chmod +x /usr/local/bin/analyze-dump
 
 RUN wget -O dotMemoryclt.zip https://www.nuget.org/api/v2/package/JetBrains.dotMemory.Console.linux-x64 && \
-apt-get install -y unzip && \
-unzip dotMemoryclt.zip -d ./dotMemoryclt && \
-chmod +x -R dotMemoryclt/*
+    apt-get update && apt-get install -y unzip && \
+    unzip dotMemoryclt.zip -d ./dotMemoryclt && \
+    chmod +x -R dotMemoryclt/*
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
