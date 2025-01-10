@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -21,25 +20,65 @@ import (
 const (
 	TestImageName     = "ram-dumper-test-image"
 	TestContainerName = "ram-dumper-test-container"
+	TestDumpsDir      = "/tmp/test-dumps"
 )
 
-func StartTestContainer(t *testing.T) string {
-	ctx := context.Background()
+type testContext struct {
+	*testing.T
+	containerName string
+	imageName     string
+	context       context.Context
+}
+
+func NewTestContext(t *testing.T, containerName string, imageName string) *testContext {
+	return &testContext{t, containerName, imageName, context.Background()}
+}
+
+func (ctx *testContext) Context() context.Context {
+	return ctx.context
+}
+
+func StartTestContainer(ctx *testContext) string {
+	t := ctx.T
+	containerName := ctx.containerName
+	imageName := ctx.imageName
+	if containerName == "" {
+		containerName = TestContainerName
+	}
+	if imageName == "" {
+		imageName = TestImageName
+	}
+	dockerCtx := ctx.Context()
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		t.Fatalf("Failed to create Docker client: %v", err)
 	}
 
-	fmt.Println("Creating container:", TestContainerName)
-	resp, err := cli.ContainerCreate(ctx, &container.Config{
-		Image: TestImageName,
+	fmt.Println("Creating container:", containerName)
+	hostConfig := &container.HostConfig{
+		Privileged: true,
+		SecurityOpt: []string{
+			"seccomp=unconfined",
+			"apparmor=unconfined",
+		},
+		CapAdd: []string{
+			"SYS_PTRACE",
+			"SYS_ADMIN",
+		},
+		Binds: []string{
+			fmt.Sprintf("%s:/tmp/dumps", TestDumpsDir),
+		},
+	}
+
+	resp, err := cli.ContainerCreate(dockerCtx, &container.Config{
+		Image: imageName,
 		Cmd:   []string{"sleep", "infinity"},
-	}, nil, nil, nil, TestContainerName)
+	}, hostConfig, nil, nil, containerName)
 	if err != nil {
 		t.Fatalf("Failed to create container: %v", err)
 	}
 
-	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if err := cli.ContainerStart(dockerCtx, resp.ID, container.StartOptions{}); err != nil {
 		t.Fatalf("Failed to start container: %v", err)
 	}
 
@@ -54,11 +93,9 @@ func RunStressCommand(containerID string, vmBytes string, timeout string) ([]byt
 	}
 
 	cmd := []string{
-		"stress-ng",
-		"--vm", "1",
-		"--vm-bytes", vmBytes,
-		"--vm-hang", "0",
-		"--timeout", timeout,
+		"run-memory-stress",
+		vmBytes,
+		strings.TrimSuffix(timeout, "s"),
 	}
 	execConfig := container.ExecOptions{
 		Cmd:          cmd,
@@ -77,18 +114,28 @@ func RunStressCommand(containerID string, vmBytes string, timeout string) ([]byt
 	}
 	defer resp.Close()
 
-	output, err := io.ReadAll(resp.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read exec output: %v", err)
-	}
+	outputCh := make(chan []byte)
+	errCh := make(chan error)
+	go func() {
+		output, err := io.ReadAll(resp.Reader)
+		if err != nil {
+			errCh <- fmt.Errorf("failed to read exec output: %v", err)
+			return
+		}
+		outputCh <- output
+	}()
 
 	err = cli.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to start exec: %v", err)
 	}
 
-	time.Sleep(5 * time.Second)
-	return output, nil
+	select {
+	case output := <-outputCh:
+		return output, nil
+	case err := <-errCh:
+		return nil, err
+	}
 }
 
 func StopAndRemoveContainer(t *testing.T, containerID string) {
@@ -114,19 +161,23 @@ func RemoveTestContainer() {
 	exec.Command("docker", "rm", "-f", TestContainerName).Run()
 }
 
-func RunDockerRamDumper(args map[string]string) ([]byte, error) {
+func RunDockerRamDumper(flags map[string]string) ([]byte, error) {
 	baseCmd := []string{
 		"docker", "run",
 		"--cap-add=SYS_PTRACE",
+		"--cap-add=SYS_ADMIN",
 		"--security-opt", "seccomp=unconfined",
+		"--security-opt", "apparmor=unconfined",
+		"--privileged",
 		"--user=root",
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
-		"-v", "/tmp/test-dumps:/tmp/dumps",
+		"-v", fmt.Sprintf("%s:/tmp/dumps", TestDumpsDir),
+		"-v", "/tmp/diagnostics:/tmp/diagnostics",
 		"--net=host",
 		"-i", "docker-ram-dumper",
 	}
 
-	for key, value := range args {
+	for key, value := range flags {
 		baseCmd = append(baseCmd, fmt.Sprintf("-%s=%s", key, value))
 	}
 
@@ -286,4 +337,9 @@ func CopyFromContainer(client *http.Client, containerName, srcPath, dstPath, bas
 	}
 
 	return nil
+}
+
+func RunCommand(name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	return cmd.CombinedOutput()
 }

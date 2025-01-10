@@ -37,7 +37,7 @@ staticcheck: ## Run staticcheck against code
 
 test: generate build-docker-test ## Run tests
 	@go clean -testcache 
-	@go test ./...
+	@go test -timeout 5m ./...
 
 codecov-test: generate ## Run tests with coverage
 	@mkdir -p coverage

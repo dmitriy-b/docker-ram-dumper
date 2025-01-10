@@ -116,6 +116,21 @@ docker pull ghcr.io/dmitriy-b/docker-ram-dumper:main
 - The tool requires the ability to execute commands inside the target container and copy files from it.
 - Memory dumps can be large, so ensure sufficient disk space is available in both the container and on the host.
 
+### Features / Bugs
+
+- [ ] Add an ability to set the threshold in GB
+- [ ] Integration tests for dotnet SDK installation
+- [ ] Allow to pass PID instead of process name
+- [ ] Monitor with forever loop
+- [ ] Test which command is used to check if the tool is already installed
+- [ ] With cleanup options remove the N files from the container, not all
+- [ ] Stop docker-ram-dumper when the limit is reached? Fix the timeout
+- [ ] Fix host location for dumps
+
+### Known issues
+
+- [ ] When using dotnet-dump, cannot open the dump within the container
+
 ## License
 
 [MIT License](LICENSE)

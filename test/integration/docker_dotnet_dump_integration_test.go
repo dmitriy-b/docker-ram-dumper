@@ -12,6 +12,9 @@ import (
 	helpers "github.com/NethermindEth/docker-ram-dumper/internal/_helpers"
 )
 
+const testContainerName = "ram-dumper-test-container"
+const testImageName = "ram-dumper-test-image"
+
 // - `-threshold float`: Memory usage threshold percentage (default 90.0)
 // - `-process string`: Name of the process to monitor (default "dotnet")
 // - `-dumpdir-container string`: Directory to store memory dumps inside the container (default "/tmp/dumps")
@@ -25,45 +28,29 @@ import (
 // - `-dump-tool string`: Tool to use for memory dump, `procdump` or `dotnet-dump` (default "procdump")
 // - `-timeout duration`: Global timeout for the tool to exit (default 0 or 10 minutes if -monitor is set)
 
-const (
-	dirPerms = 0o755
-)
+func setupIntegrationTest(t *testing.T) (context.Context, context.CancelFunc) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	return context.WithTimeout(context.Background(), 3*time.Minute)
+}
 
-func TestMain(m *testing.M) {
-	// Setup
-	cleanup()
-
-	// Ensure dump directory exists
-	err := os.MkdirAll(helpers.TestDumpsDir, dirPerms)
-	if err != nil {
-		fmt.Println("Error creating dump directory:", err)
-		return
+func TestDotnetDumpMemoryDumper(t *testing.T) {
+	t.Parallel()
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Run the tests
-	code := m.Run()
-	// Teardown
-	cleanup()
-
-	os.Exit(code)
-}
-
-func cleanup() {
-	// Remove the test container if it exists
-	cmd := exec.Command("docker", "rm", "-f", helpers.TestContainerName)
-	cmd.Run() // Ignore errors, as the container might not exist
-
-}
-
-func TestMemoryDumper(t *testing.T) {
 	// Set a longer timeout for this test
-	_, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	// Start the test container
+
+	// Create a test context with the desired container name
 	testCtx := helpers.NewTestContext(t, testContainerName, testImageName)
+
+	// Start the test container
 	containerID := helpers.StartTestContainer(testCtx)
 	defer helpers.StopAndRemoveContainer(t, containerID)
-	// Clean up the test dumps
 	defer os.RemoveAll(helpers.TestDumpsDir)
 
 	// Run memory stress in the background
@@ -110,40 +97,58 @@ func TestMemoryDumper(t *testing.T) {
 	}
 
 	flags := map[string]string{
-		"threshold": "80",
-		"process":   "MemoryStress",
-		"container": helpers.TestContainerName,
+		"threshold":         "80",
+		"process":           "MemoryStress",
+		"container":         testContainerName,
+		"dumpdir-container": "/tmp/dumps",
+		"dump-tool":         "dotnet-dump",
 	}
-	runDockerRamDumperAsync(flags, t)
+	runDotnetDumpAsync(ctx, flags, t)
 	// Check if the dump file was created
-	checkDumpFiles(t, 1)
+	checkDotnetDumpFiles(t, 1)
+
+	// Add this function to help with debugging
+	getDotnetDumpAnalyzeLogs(t, containerID)
 }
 
-func TestMemoryDumperNegativeScenario(t *testing.T) {
-	// Start the test container
+func TestDotnetDumpNegativeScenario(t *testing.T) {
+	ctx, cancel := setupIntegrationTest(t)
+	defer cancel()
+
+	// Create a test context with the desired container name
 	testCtx := helpers.NewTestContext(t, testContainerName, testImageName)
+
+	// Start the test container
 	containerID := helpers.StartTestContainer(testCtx)
 	defer helpers.StopAndRemoveContainer(t, containerID)
 	// Clean up the test dumps
 	defer os.RemoveAll(helpers.TestDumpsDir)
 
 	// Run the memory stress command in the background
-	runDockerStressCommandAsync(containerID, "50%", "15s")
+	runDockerStressCommandAsync(containerID, "60%", "15s")
 
 	flags := map[string]string{
 		"threshold": "60",
 		"process":   "MemoryStress",
-		"container": helpers.TestContainerName,
+		"container": testContainerName,
 	}
-	runDockerRamDumperAsync(flags, t)
+	runDotnetDumpAsync(ctx, flags, t)
 
 	// Check if the dump file was created
 	checkDumpFiles(t, 0)
+
+	// Add this function to help with debugging
+	getDotnetDumpAnalyzeLogs(t, containerID)
 }
 
-func TestDefaultThreasholdScenario(t *testing.T) {
-	// Start the test container
+func TestDotnetDumpDefaultThreasholdScenario(t *testing.T) {
+	ctx, cancel := setupIntegrationTest(t)
+	defer cancel()
+
+	// Create a test context with the desired container name
 	testCtx := helpers.NewTestContext(t, testContainerName, testImageName)
+
+	// Start the test container
 	containerID := helpers.StartTestContainer(testCtx)
 	defer helpers.StopAndRemoveContainer(t, containerID)
 	// Clean up the test dumps
@@ -154,18 +159,26 @@ func TestDefaultThreasholdScenario(t *testing.T) {
 
 	flags := map[string]string{
 		"process":   "MemoryStress",
-		"container": helpers.TestContainerName,
+		"container": testContainerName,
 	}
-	runDockerRamDumperAsync(flags, t)
+	runDotnetDumpAsync(ctx, flags, t)
 
 	// Check if the dump file was created
 	// Shold not create dump file because threshold is 90% by default
 	checkDumpFiles(t, 0)
+
+	// Add this function to help with debugging
+	getDotnetDumpAnalyzeLogs(t, containerID)
 }
 
-func TestThreasholdMBScenario(t *testing.T) {
-	// Start the test container
+func TestDotnetDumpThreasholdMBScenario(t *testing.T) {
+	ctx, cancel := setupIntegrationTest(t)
+	defer cancel()
+
+	// Create a test context with the desired container name
 	testCtx := helpers.NewTestContext(t, testContainerName, testImageName)
+
+	// Start the test container
 	containerID := helpers.StartTestContainer(testCtx)
 	defer helpers.StopAndRemoveContainer(t, containerID)
 	// Clean up the test dumps
@@ -177,65 +190,83 @@ func TestThreasholdMBScenario(t *testing.T) {
 	flags := map[string]string{
 		"threshold": "10MB",
 		"process":   "MemoryStress",
-		"container": helpers.TestContainerName,
+		"container": testContainerName,
 	}
-	runDockerRamDumperAsync(flags, t)
+	runDotnetDumpAsync(ctx, flags, t)
 
 	// Check if the dump file was created
 	checkDumpFiles(t, 1)
+
+	// Add this function to help with debugging
+	getDotnetDumpAnalyzeLogs(t, containerID)
 }
 
-func checkDumpFiles(t *testing.T, filesCount int) {
+func checkDotnetDumpFiles(t *testing.T, filesCount int) {
 	dumpFiles, err := os.ReadDir(helpers.TestDumpsDir)
 	if err != nil {
 		t.Fatalf("Failed to read dump directory: %v", err)
 	}
 
 	if len(dumpFiles) != filesCount {
-		// if there are more than one file, check if all files have the same name
-		if len(dumpFiles) > 1 && filesCount == 1 {
-			for _, dumpFile := range dumpFiles {
-				if strings.Split(dumpFile.Name(), "_")[0] != strings.Split(dumpFiles[0].Name(), "_")[0] {
-					t.Errorf("Expected all dump files to have the same name, but found %s and %s", dumpFile.Name(), dumpFiles[0].Name())
-				}
-			}
-		} else {
-			t.Errorf("Expected %d dump files, but found %d. Dump files: %v", filesCount, len(dumpFiles), dumpFiles)
-		}
+		t.Errorf("Expected %d dump files, but found %d", filesCount, len(dumpFiles))
 	}
 }
 
-func runDockerRamDumperAsync(flags map[string]string, t *testing.T) (chan []byte, chan error) {
+func runDotnetDumpAsync(ctx context.Context, flags map[string]string, t *testing.T) (chan []byte, chan error) {
 	outputCh := make(chan []byte, 1)
 	errCh := make(chan error, 1)
 
+	// Run docker-ram-dumper
 	go func() {
 		output, err := helpers.RunDockerRamDumper(flags)
 		if err != nil {
+			t.Logf("docker-ram-dumper error: %v", err)
 			errCh <- fmt.Errorf("Failed to run main program: %v\nOutput: %s", err, output)
 			return
 		}
+		t.Logf("docker-ram-dumper output: %s", output)
 		outputCh <- output
 	}()
-	// Check for errors from the goroutines
-	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("runStressCommand or main program failed: %v", err)
-		}
-	case output := <-outputCh:
-		t.Logf("docker-ram-dumper output: %s", output)
-	}
 
-	return outputCh, errCh
+	// Wait for dump file to appear
+	dumpTimeout := time.After(60 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("runStressCommand or main program failed: %v", err)
+			}
+		case output := <-outputCh:
+			t.Logf("docker-ram-dumper output: %s", output)
+			return outputCh, errCh
+		case <-ticker.C:
+			// Check if dump file exists
+			files, _ := os.ReadDir(helpers.TestDumpsDir)
+			if len(files) > 0 {
+				t.Logf("Found dump file: %s", files[0].Name())
+				return outputCh, errCh
+			}
+		case <-dumpTimeout:
+			t.Log("Getting container logs after timeout...")
+			getDotnetDumpAnalyzeLogs(t, flags["container"])
+			t.Fatal("Timeout waiting for dump file")
+		case <-ctx.Done():
+			t.Fatal("Context cancelled")
+		}
+	}
 }
 
-func runDockerStressCommandAsync(containerID string, vmBytes string, timeout string) (chan []byte, chan error) {
+func runDotnetDumpAnalyzeAsync(containerID string, vmBytes string, timeout string) (chan []byte, chan error) {
 	errCh := make(chan error, 1)
 	var output []byte
 	go func() {
+		// Convert timeout from "15s" format to just "15"
+		seconds := timeout[:len(timeout)-1]
 		var err error
-		output, err = helpers.RunStressCommand(containerID, vmBytes, timeout)
+		output, err = helpers.RunCommand("docker", "exec", containerID, "run-memory-stress", vmBytes, seconds)
 		errCh <- err
 	}()
 
@@ -245,4 +276,34 @@ func runDockerStressCommandAsync(containerID string, vmBytes string, timeout str
 	}()
 
 	return outputCh, errCh
+}
+
+// Add this function to help with debugging
+func getDotnetDumpAnalyzeLogs(t *testing.T, containerName string) {
+	t.Helper()
+
+	// Get all container logs
+	cmd := exec.Command("docker", "logs", containerName)
+	logs, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Error getting container logs: %v", err)
+	}
+	t.Logf("Container logs:\n%s", string(logs))
+
+	// Get the output of specific diagnostic commands
+	diagnosticCommands := []string{
+		"ps aux",
+		"ls -la /tmp",
+		"ls -la /var/dumps",
+		"ls -la /tmp/diagnostics",
+		"cat /tmp/strace_*.log",
+	}
+
+	for _, cmd := range diagnosticCommands {
+		output, err := exec.Command("docker", "exec", containerName, "sh", "-c", cmd).CombinedOutput()
+		if err != nil {
+			t.Logf("Error running '%s': %v", cmd, err)
+		}
+		t.Logf("Output of '%s':\n%s", cmd, string(output))
+	}
 }
