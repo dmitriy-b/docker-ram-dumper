@@ -17,9 +17,11 @@ RUN wget -q https://packages.microsoft.com/config/ubuntu/24.04/packages-microsof
     rm packages-microsoft-prod.deb && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        procdump \
         dotnet-sdk-8.0 && \
-    rm -rf /var/lib/apt/lists/*
+        apt-get install -y --no-install-recommends procdump=1.2-4 > /tmp/test.txt \
+        && cat /tmp/test.txt \
+        && rm -rf /var/lib/apt/lists/*
+
 
 # Create directories and set permissions
 RUN mkdir -p /var/dumps /tmp/diagnostics && \
