@@ -77,7 +77,7 @@ func TestMemoryDumper(t *testing.T) {
 		t.Logf("run-memory-stress permissions: %s", output)
 
 		// Check if MemoryStress exists
-		cmd = exec.Command("docker", "exec", containerID, "ls", "-l", "/root/MemoryStress/bin/Release/net7.0/MemoryStress")
+		cmd = exec.Command("docker", "exec", containerID, "ls", "-l", "/root/MemoryStress/bin/Release/net8.0/MemoryStress")
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			t.Errorf("Failed to check MemoryStress: %v\nOutput: %s", err, output)

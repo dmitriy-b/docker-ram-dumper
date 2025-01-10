@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Install necessary packages
 RUN apt-get update && \
@@ -12,13 +12,13 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Add Microsoft package repository and install procdump and dotnet
-RUN wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
+RUN wget -q https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
     dpkg -i packages-microsoft-prod.deb && \
     rm packages-microsoft-prod.deb && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        procdump=1.2-2 \
-        dotnet-sdk-7.0 && \
+        procdump \
+        dotnet-sdk-8.0 && \
     rm -rf /var/lib/apt/lists/*
 
 # Create directories and set permissions
@@ -131,7 +131,7 @@ RUN dotnet new console -n MemoryStress -o /root/MemoryStress && \
 # Create a script to run the memory stress test
 COPY <<-"EOF" /usr/local/bin/run-memory-stress
 #!/bin/bash
-cd /root/MemoryStress/bin/Release/net7.0
+cd /root/MemoryStress/bin/Release/net8.0
 ./MemoryStress "$@"
 EOF
 

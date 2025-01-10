@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         go: ["1.22"]
-        os: [ubuntu-latest]
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -52,7 +52,7 @@ jobs:
     strategy:
       matrix:
         go: ["1.22"]
-        os: [ubuntu-latest]
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -95,7 +95,7 @@ jobs:
     strategy:
       matrix:
         go: ["1.22"]
-        os: [ubuntu-latest]
+        os: [ubuntu-24.04]
         codecov: [false]
     runs-on: ${{ matrix.os }}
 
