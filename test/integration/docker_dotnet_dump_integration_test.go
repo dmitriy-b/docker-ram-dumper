@@ -261,25 +261,6 @@ func runDotnetDumpAsync(ctx context.Context, flags map[string]string, t *testing
 	}
 }
 
-func runDotnetDumpAnalyzeAsync(containerID string, vmBytes string, timeout string) (chan []byte, chan error) {
-	errCh := make(chan error, 1)
-	var output []byte
-	go func() {
-		// Convert timeout from "15s" format to just "15"
-		seconds := timeout[:len(timeout)-1]
-		var err error
-		output, err = helpers.RunCommand("docker", "exec", containerID, "run-memory-stress", vmBytes, seconds)
-		errCh <- err
-	}()
-
-	outputCh := make(chan []byte, 1)
-	go func() {
-		outputCh <- output
-	}()
-
-	return outputCh, errCh
-}
-
 // Add this function to help with debugging
 func getDotnetDumpAnalyzeLogs(t *testing.T, containerName string) {
 	t.Helper()
