@@ -52,7 +52,6 @@ func cleanup() {
 	// Remove the test container if it exists
 	cmd := exec.Command("docker", "rm", "-f", helpers.TestContainerName)
 	cmd.Run() // Ignore errors, as the container might not exist
-
 }
 
 func TestMemoryDumper(t *testing.T) {

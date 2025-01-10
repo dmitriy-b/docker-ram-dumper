@@ -12,8 +12,10 @@ import (
 	helpers "github.com/NethermindEth/docker-ram-dumper/internal/_helpers"
 )
 
-const testContainerName = "ram-dumper-test-container"
-const testImageName = "ram-dumper-test-image"
+const (
+	testContainerName = "ram-dumper-test-container"
+	testImageName     = "ram-dumper-test-image"
+)
 
 // - `-threshold float`: Memory usage threshold percentage (default 90.0)
 // - `-process string`: Name of the process to monitor (default "dotnet")
