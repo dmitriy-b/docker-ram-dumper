@@ -38,7 +38,7 @@ func setupIntegrationTest(t *testing.T) (context.Context, context.CancelFunc) {
 }
 
 func TestDotnetDumpMemoryDumper(t *testing.T) {
-	t.Parallel()
+	// t.Parallel()
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}

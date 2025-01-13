@@ -168,7 +168,7 @@ func TestCreateDotnetDump(t *testing.T) {
 	totalMemoryThreshold := 1800.0
 	checkInterval := 1 * time.Second
 
-	output, err := createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, server.URL, checkInterval)
+	output, err := createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, server.URL, checkInterval, "dotnet-dump")
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -269,6 +269,32 @@ func TestInstallDumpToolProcdumpNotInstalled(t *testing.T) {
 	}
 }
 
+func TestInstallDumpToolDotMemoryNotInstalled(t *testing.T) {
+	server, client := mockExecInContainer("")
+	defer server.Close()
+
+	originalExecInContainer := helpers.ExecInContainer
+	helpers.ExecInContainer = func(client *http.Client, containerName, baseDockerURL string, command ...string) (string, error) {
+		return strings.Join(command, " "), nil
+	}
+	defer func() {
+		helpers.ExecInContainer = originalExecInContainer
+	}()
+
+	containerName := "test-container"
+
+	output, err := installDumpTool(client, containerName, "dotMemory", server.URL)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	expectedOutput := "ls /dotMemoryclt/dotmemory"
+
+	if output != expectedOutput {
+		t.Errorf("Unexpected output: got %q, want %q", output, expectedOutput)
+	}
+}
+
 func TestInstallDumpToolProcdumpInstalled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -315,6 +341,57 @@ func TestInstallDumpToolProcdumpInstalled(t *testing.T) {
 	}
 
 	expectedOutput := "sh -c apk add --no-cache procdump || apt-get update && apt-get install -y procdump"
+	if string(testBodyOutput) != expectedOutput {
+		t.Errorf("Unexpected output: got %q, want %q", string(testBodyOutput), expectedOutput)
+	}
+}
+
+func TestInstallDumpToolDotMemoryInstalled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/containers/test-container/exec":
+			w.WriteHeader(http.StatusCreated)
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Error reading body", http.StatusInternalServerError)
+				return
+			}
+			if strings.Contains(string(body), "which") {
+				http.Error(w, "Not found", http.StatusNotFound)
+				return
+			}
+			w.Write([]byte(`{"Id":"test-exec-id"}`))
+			// Store the raw body in testBodyOutput
+			testBodyOutput = body
+
+			// Decode the body into execConfig
+			var execConfig struct {
+				Cmd []string `json:"Cmd"`
+			}
+			if err := json.Unmarshal(body, &execConfig); err != nil {
+				http.Error(w, "Failed to decode JSON", http.StatusBadRequest)
+				return
+			}
+			// Store the Cmd as a JSON string in testBodyOutput
+			testBodyOutput = []byte(strings.Join(execConfig.Cmd, " "))
+		case "/exec/test-exec-id/start":
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{}`))
+		default:
+			http.Error(w, "Not found", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client := server.Client()
+
+	containerName := "test-container"
+
+	_, err := installDumpTool(client, containerName, "dotMemory", server.URL)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	expectedOutput := "ls /dotMemoryclt/dotmemory"
 	if string(testBodyOutput) != expectedOutput {
 		t.Errorf("Unexpected output: got %q, want %q", string(testBodyOutput), expectedOutput)
 	}
