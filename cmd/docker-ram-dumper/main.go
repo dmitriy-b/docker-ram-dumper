@@ -8,12 +8,19 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	helpers "github.com/NethermindEth/docker-ram-dumper/internal/_helpers"
+)
+
+var (
+	dotMemoryTimeout string
+	dotMemoryVersion string
 )
 
 func main() {
@@ -44,9 +51,10 @@ func main() {
 	flag.IntVar(&dumpsCount, "dumps-count", 1, "Number of memory dumps to create before stopping")
 	flag.BoolVar(&cleanup, "cleanup", false, "Clean up dumps in container after a memory dump")
 	flag.StringVar(&baseDockerURL, "docker-url", "http://localhost", "Base URL for Docker API")
-	flag.StringVar(&dumpTool, "dump-tool", "procdump", "Tool to use for memory dump (procdump or dotnet-dump)")
+	flag.StringVar(&dumpTool, "dump-tool", "procdump", "Tool to use for memory dump (procdump, dotnet-dump, dotMemory)")
 	flag.DurationVar(&globalTimeout, "timeout", 0, "Global timeout for the application (e.g., 1h, 30m, 1h30m)")
-
+	flag.StringVar(&dotMemoryTimeout, "dotmemory-timeout", "30s", "Timeout for dotMemory tool")
+	flag.StringVar(&dotMemoryVersion, "dotmemory-version", "2024.3.3", "Version of dotMemory tool")
 	flag.Parse()
 
 	isPercentage = !strings.HasSuffix(strings.ToLower(threshold), "mb")
@@ -128,15 +136,15 @@ func main() {
 				if err != nil {
 					fmt.Println("Error installing dump tool:", err)
 					time.Sleep(checkInterval)
-					continue
+					return
 				}
 
 				// Get the PID of the processName process inside the target container
 				pid, err := helpers.GetPIDInContainer(client, containerName, processName, baseDockerURL)
 				if err != nil {
 					fmt.Println("Error getting PID:", err)
-					time.Sleep(checkInterval)
-					continue
+					fmt.Println("Please check if the processName is correct and if the container is running.")
+					return
 				} else {
 					fmt.Printf("PID of %s is %d\n", processName, pid)
 				}
@@ -159,19 +167,25 @@ func main() {
 					continue
 				}
 
-				fmt.Printf("Memory dump saved to %s inside the target container.\n", dumpFile)
-
-				// Copy the dump file from the target container to the host
-				hostDumpFile := filepath.Join(dumpDirHost, filepath.Base(dumpFile))
 				if dumpTool == "procdump" {
 					dumpFile = dumpFile + "_0." + strconv.Itoa(pid)
 				}
-				err = helpers.CopyFromContainer(client, containerName, dumpFile, hostDumpFile, baseDockerURL)
+				if dumpTool == "dotMemory" {
+					// replace ".dmp" with ".dmw"
+					dumpFile = dumpFile + ".dmw"
+				}
+				// Copy the dump file from the target container to the host
+				hostDumpFile := filepath.Join(dumpDirHost, filepath.Base(dumpFile))
+				fmt.Printf("Trying to save memory dump to %s inside the target container ...\n", hostDumpFile)
+				// _ = helpers.CopyFromContainer(client, containerName, dumpFile, dumpFile, baseDockerURL)
+
+				cmd := exec.Command("docker", "cp", fmt.Sprintf("%s:%s", containerName, dumpFile), dumpFile)
+				output, err := cmd.CombinedOutput()
 				if err != nil {
 					fmt.Println("Error copying dump file (dumpFile) to host:", err)
-					fmt.Printf("Command output: %s\n", dumpOutput)
+					fmt.Printf("Command output: %s\n", output)
 				} else {
-					fmt.Printf("Dump file copied to host: %s\n", hostDumpFile)
+					fmt.Printf("Dump file copied to container: %s. Use docker volumes to get it\n", dumpFile)
 				}
 
 				dumpCounter++
@@ -236,6 +250,27 @@ func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL
 			fmt.Printf("dotnet-dump is already installed: %s\n", which)
 			return which, nil
 		}
+	case "dotMemory":
+		// Check if dotnet-dump is already installed
+		which, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "ls", "/dotMemoryclt/dotmemory")
+		if err != nil || strings.Contains(which, "No such file or directory") {
+			fmt.Println("dotMemory not found. Installing...")
+			dockerArch := "linux-arm64"
+			if runtime.GOARCH == "amd64" {
+				dockerArch = "linux-x64"
+			} else if runtime.GOARCH == "arm64" {
+				dockerArch = "linux-arm64"
+			}
+			result, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y dotnet-sdk-8.0 curl && curl -L -o dotMemory.tar.gz https://download.jetbrains.com/resharper/dotUltimate."+dotMemoryVersion+"/JetBrains.dotMemory.Console."+dockerArch+"."+dotMemoryVersion+".tar.gz && mkdir -p /dotMemoryclt && tar -xzf dotMemory.tar.gz -C /dotMemoryclt && chmod +x -R /dotMemoryclt/*")
+			if err != nil {
+				return "", fmt.Errorf("error installing dotnet-dump: %v", err)
+			}
+			fmt.Println("dotMemory installed successfully.")
+			return result, nil
+		} else {
+			fmt.Printf("dotMemory is already installed: %s\n", which)
+			return which, nil
+		}
 	default:
 		return "", fmt.Errorf("unsupported dump tool: %s", dumpTool)
 	}
@@ -249,13 +284,16 @@ func createMemoryDump(client *http.Client, containerName, dumpTool string, pid i
 		return helpers.ExecInContainer(client, containerName, baseDockerURL, cmd...)
 	case "dotnet-dump":
 		// Create a wrapper function to check memory usage before running dotnet-dump
-		return createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, baseDockerURL, checkInterval)
+		return createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, baseDockerURL, checkInterval, "dotnet-dump")
+	case "dotMemory":
+		// Create a wrapper function to check memory usage before running dotnet-dump
+		return createDotnetDump(client, containerName, pid, dumpFile, totalMemoryThreshold, baseDockerURL, checkInterval, "dotMemory")
 	default:
 		return "", errors.New("unsupported dump tool")
 	}
 }
 
-func createDotnetDump(client *http.Client, containerName string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string, checkInterval time.Duration) (string, error) {
+func createDotnetDump(client *http.Client, containerName string, pid int, dumpFile string, totalMemoryThreshold float64, baseDockerURL string, checkInterval time.Duration, tool string) (string, error) {
 	for {
 		memUsagePercent, memoryUsageMB, err := helpers.GetContainerMemoryUsage(client, containerName, baseDockerURL, false)
 		if err != nil {
@@ -263,8 +301,40 @@ func createDotnetDump(client *http.Client, containerName string, pid int, dumpFi
 		}
 
 		if float64(memoryUsageMB) >= totalMemoryThreshold {
-			cmd := []string{"/root/.dotnet/tools/dotnet-dump", "collect", "-p", fmt.Sprintf("%d", pid), "-o", dumpFile}
-			return helpers.ExecInContainer(client, containerName, baseDockerURL, cmd...)
+			if tool == "dotnet-dump" {
+				cmd := []string{"/root/.dotnet/tools/dotnet-dump", "collect", "-p", fmt.Sprintf("%d", pid), "-o", dumpFile}
+				return helpers.ExecInContainer(client, containerName, baseDockerURL, cmd...)
+			} else if tool == "dotMemory" {
+				cmd := []string{"/dotMemoryclt/dotmemory", "attach", fmt.Sprintf("%d", pid), "--save-to-file=" + dumpFile, "--overwrite", "--trigger-on-activation", "--timeout=" + dotMemoryTimeout}
+				fmt.Println("Executing command:", cmd)
+				output, err := helpers.ExecInContainer(client, containerName, baseDockerURL, cmd...)
+				// if unrecognized address, try to run dotmemory again
+				const maxRetries = 5
+				retryCount := 0
+				for (strings.Contains(output, "unrecognized address") || strings.Contains(output, "Object reference not set to an instance of an object") || strings.Contains(output, "Non-writeable path")) && retryCount < maxRetries {
+					fmt.Printf("Retrying command (attempt %d of %d)...\n", retryCount+1, maxRetries)
+					if strings.Contains(output, "-writeable path") {
+						// remove dump directory
+						fmt.Println("Removing dump directory...")
+						helpers.ExecInContainer(client, containerName, baseDockerURL, "rm", "-rf", "/tmp/dumps")
+						time.Sleep(2 * time.Second)
+					}
+					// cmd = []string{"/dotMemoryclt/dotmemory", "get-snapshot", fmt.Sprintf("%d", pid), "--save-to-file=" + dumpFile, "--overwrite"}
+					cmd = []string{"/dotMemoryclt/dotmemory", "attach", fmt.Sprintf("%d", pid), "--save-to-file=" + dumpFile, "--overwrite", "--trigger-on-activation", "--timeout=" + dotMemoryTimeout}
+					output, err = helpers.ExecInContainer(client, containerName, baseDockerURL, cmd...)
+					retryCount++
+					if err != nil {
+						fmt.Printf("Cannot save memory dump. Attempt %d failed: %v\n", retryCount, err)
+					}
+					time.Sleep(2 * time.Second) // Add small delay between retries
+				}
+				fmt.Println("dotMemory output:", output)
+				files, _ := helpers.ExecInContainer(client, containerName, baseDockerURL, "ls", "-l", "/tmp/dumps")
+				fmt.Println("Files in /tmp/dumps:", files)
+				return output, err
+			} else {
+				return "", errors.New("unsupported dump tool: " + tool)
+			}
 		} else {
 			fmt.Printf("Memory usage is %.2f%% (%.0f MB). Waiting for memory usage to exceed %.0f%% (%.0f MB)...\n",
 				memUsagePercent,

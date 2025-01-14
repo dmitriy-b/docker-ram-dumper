@@ -335,7 +335,7 @@ func CopyFromContainer(client *http.Client, containerName, srcPath, dstPath, bas
 	if err != nil {
 		return fmt.Errorf("failed to copy file content: %v", err)
 	}
-
+	fmt.Printf("Copied file from container: %s to host: %s\n", srcPath, dstPath)
 	return nil
 }
 
