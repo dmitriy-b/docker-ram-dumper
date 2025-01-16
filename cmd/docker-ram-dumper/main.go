@@ -74,6 +74,7 @@ func main() {
 
 	if cleanup {
 		defer cleanupDumps(client, containerName, dumpDirContainer, baseDockerURL)
+		defer killProcess(client, containerName, dumpTool, baseDockerURL)
 	}
 
 	// Ensure dump directory exists
@@ -214,6 +215,18 @@ func cleanupDumps(client *http.Client, containerName, dumpDirContainer, baseDock
 		return fmt.Errorf("error cleaning up dumps in container: %v", err)
 	} else {
 		fmt.Println("Successfully cleaned up dumps in container.")
+	}
+	return nil
+}
+
+func killProcess(client *http.Client, containerName, processName, baseDockerURL string) error {
+	processes, _ := helpers.ExecInContainer(client, containerName, baseDockerURL, "ps", "aux")
+	fmt.Println("Active processes:\n", processes)
+	_, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "pkill", "-f", processName)
+	if err != nil {
+		return fmt.Errorf("error killing process: %v", err)
+	} else {
+		fmt.Println("Successfully killed " + processName + " process.")
 	}
 	return nil
 }

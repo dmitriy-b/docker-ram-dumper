@@ -9,12 +9,20 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o docker-ram-dumper ./cmd/docker-ram-dump
 # Final stage
 FROM alpine:latest
 
-# Install Docker CLI
+# Install Docker CLI and required packages
 RUN apk add --no-cache \
     docker-cli \
-    bash
+    bash \
+    gdb \
+    strace \
+    procps \
+    libc6-compat
 
-RUN mkdir -p /tmp/dumps
+RUN mkdir -p /tmp/dumps && chmod 1777 /tmp/dumps
 WORKDIR /root/
 COPY --from=builder /app/docker-ram-dumper .
+
+# Set proper permissions for dump operations
+ENV TMPDIR="/tmp"
+
 ENTRYPOINT ["./docker-ram-dumper"]

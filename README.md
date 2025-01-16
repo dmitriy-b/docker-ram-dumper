@@ -17,6 +17,7 @@ Docker RAM Dumper is a Go-based tool designed to monitor memory usage of a speci
 - [procdump](https://github.com/Sysinternals/ProcDump-for-Linux) installed in the container (if not, it will be installed by the tool)
 - ps, grep, awk installed in the container or passed from host (to get the pid of the process to dump)
 - .NET Core SDK installed in the container (if using [dotnet-dump](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-dump))
+- dotMemory installed in the container (if using [dotMemory](https://www.jetbrains.com/help/dotmemory/))
 
 
 ## Installation
@@ -56,7 +57,7 @@ Run the tool with the following command:
 - `-dumps-count int`: Number of memory dumps to create before stopping (default 1)
 - `-cleanup`: Clean up dumps in container after copying memory dump to host (default false)
 - `-base-docker-url string`: Base Docker URL (default "http://localhost")
-- `-dump-tool string`: Tool to use for memory dump, `procdump` or `dotnet-dump` (default "procdump")
+- `-dump-tool string`: Tool to use for memory dump, `procdump`, `dotnet-dump` or `dotMemory` (default "procdump")
 - `-timeout duration`: Global timeout for the tool to exit (default 0 or 10 minutes if -monitor is set)
 
 ### Example
@@ -71,9 +72,19 @@ To monitor a container named "my-container" for a process named "myapp", with a 
 
 To run the tool inside a docker container, you can use the following command:
 
-```
+```bash
 docker build . -t docker-ram-dumper:latest
-docker run -v /var/run/docker.sock:/var/run/docker.sock -v $PWD/dumps:/tmp/dumps --net=host -it docker-ram-dumper:latest -threshold=<memory_threshold> -process=<process_name> -container=<container_name>
+docker run \
+    --privileged \
+    --cap-add=SYS_PTRACE \
+    --security-opt seccomp=unconfined \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v $PWD/dumps:/tmp/dumps \
+    --net=host \
+    -it docker-ram-dumper:latest \
+    -threshold=<memory_threshold> \
+    -process=<process_name> \
+    -container=<container_name>
 ```
 
 It is possible to pass procdump, ps, grep and awk from host to avoid installing them in the container:
