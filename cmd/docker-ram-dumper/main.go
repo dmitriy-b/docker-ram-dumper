@@ -274,7 +274,7 @@ func installDumpTool(client *http.Client, containerName, dumpTool, baseDockerURL
 			} else if runtime.GOARCH == "arm64" {
 				dockerArch = "linux-arm64"
 			}
-			result, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y dotnet-sdk-8.0 curl && curl -L -o dotMemory.tar.gz https://download.jetbrains.com/resharper/dotUltimate."+dotMemoryVersion+"/JetBrains.dotMemory.Console."+dockerArch+"."+dotMemoryVersion+".tar.gz && mkdir -p /dotMemoryclt && tar -xzf dotMemory.tar.gz -C /dotMemoryclt && chmod +x -R /dotMemoryclt/*")
+			result, err := helpers.ExecInContainer(client, containerName, baseDockerURL, "sh", "-c", "apt-get update && apt-get install -y curl && curl -L -o dotMemory.tar.gz https://download.jetbrains.com/resharper/dotUltimate."+dotMemoryVersion+"/JetBrains.dotMemory.Console."+dockerArch+"."+dotMemoryVersion+".tar.gz && mkdir -p /dotMemoryclt && tar -xzf dotMemory.tar.gz -C /dotMemoryclt && chmod +x -R /dotMemoryclt/*")
 			if err != nil {
 				return "", fmt.Errorf("error installing dotnet-dump: %v", err)
 			}
