@@ -55,7 +55,7 @@ func main() {
 	flag.StringVar(&dumpTool, "dump-tool", "procdump", "Tool to use for memory dump (procdump, dotnet-dump, dotMemory)")
 	flag.DurationVar(&globalTimeout, "timeout", 0, "Global timeout for the application (e.g., 1h, 30m, 1h30m)")
 	flag.StringVar(&dotMemoryTimeout, "dotmemory-timeout", "30s", "Timeout for dotMemory tool")
-	flag.StringVar(&dotMemoryVersion, "dotmemory-version", "2024.3.3", "Version of dotMemory tool")
+	flag.StringVar(&dotMemoryVersion, "dotmemory-version", "2024.3.5", "Version of dotMemory tool")
 	flag.BoolVar(&installOnly, "install", false, "Install dump tool and exit")
 	flag.Parse()
 
