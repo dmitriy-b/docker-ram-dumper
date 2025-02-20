@@ -39,6 +39,7 @@ func main() {
 		baseDockerURL    string
 		dumpTool         string
 		globalTimeout    time.Duration
+		installOnly      bool
 	)
 
 	flag.StringVar(&threshold, "threshold", "90%", "Memory usage threshold (e.g., '90%' or '1000MB')")
@@ -55,6 +56,7 @@ func main() {
 	flag.DurationVar(&globalTimeout, "timeout", 0, "Global timeout for the application (e.g., 1h, 30m, 1h30m)")
 	flag.StringVar(&dotMemoryTimeout, "dotmemory-timeout", "30s", "Timeout for dotMemory tool")
 	flag.StringVar(&dotMemoryVersion, "dotmemory-version", "2024.3.3", "Version of dotMemory tool")
+	flag.BoolVar(&installOnly, "install", false, "Install dump tool and exit")
 	flag.Parse()
 
 	isPercentage = !strings.HasSuffix(strings.ToLower(threshold), "mb")
@@ -71,6 +73,18 @@ func main() {
 		},
 	}
 	defer client.CloseIdleConnections()
+
+	// If install-only mode is enabled, install the tool and exit
+	if installOnly {
+		fmt.Printf("Installing %s dump tool...\n", dumpTool)
+		output, err := installDumpTool(client, containerName, dumpTool, baseDockerURL)
+		if err != nil {
+			fmt.Printf("Failed to install %s: %v\n", dumpTool, err)
+			os.Exit(1)
+		}
+		fmt.Printf("Successfully installed %s\nOutput: \n\n%s\n", dumpTool, output)
+		os.Exit(0)
+	}
 
 	if cleanup {
 		defer cleanupDumps(client, containerName, dumpDirContainer, baseDockerURL)

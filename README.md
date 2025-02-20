@@ -59,6 +59,7 @@ Run the tool with the following command:
 - `-base-docker-url string`: Base Docker URL (default "http://localhost")
 - `-dump-tool string`: Tool to use for memory dump, `procdump`, `dotnet-dump` or `dotMemory` (default "procdump")
 - `-timeout duration`: Global timeout for the tool to exit (default 0 or 10 minutes if -monitor is set)
+- `-install`: Install dump tool in the container and exit (default false)
 
 ### Example
 
@@ -66,6 +67,12 @@ To monitor a container named "my-container" for a process named "myapp", with a 
 
 ```
 ./docker-ram-dumper -container my-container -process myapp -threshold 85 -interval 1m -monitor
+```
+
+To only install a dump tool (e.g., dotnet-dump) in a container without starting monitoring:
+
+```
+./docker-ram-dumper -container my-container -dump-tool dotnet-dump -install
 ```
 
 ## Running inside docker container
