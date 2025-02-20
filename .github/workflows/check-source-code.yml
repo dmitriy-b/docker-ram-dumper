@@ -122,8 +122,8 @@ jobs:
       - name: Build docker image with app
         run: make build-docker
 
-      - name: Build docker image for testing
-        run: make build-docker-test
+      # - name: Build docker image for testing
+      #   run: make build-docker-test
 
       - name: Run tests
         if: matrix.codecov == false 
